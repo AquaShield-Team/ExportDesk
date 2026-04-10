@@ -1,0 +1,20 @@
+# ── Datos sensibles / archivos de trabajo ──
+PLANILLAS/
+*.xlsx
+!requirements.txt
+
+# ── Backups y temporales ──
+web_backup_pre_smartzone/
+*.bat
+probe_files.py
+__pycache__/
+*.pyc
+
+# ── Outputs generados ──
+Auditoria_Comex_Final.xlsx
+RESPALDO_*.xlsx
+
+# ── OS ──
+Thumbs.db
+.DS_Store
+desktop.ini

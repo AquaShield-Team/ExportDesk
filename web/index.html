@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AQUASHIELD · ExportDesk | Control de Exportaciones</title>
+    <meta name="description" content="Panel de control de auditoría y legalización de exportaciones. Auditoría Comex, BL y DUS en un solo lugar.">
+    <link rel="stylesheet" href="styles.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <!-- Lucide Icons -->
+    <!-- OBS-2: versión fija para evitar breaking changes silenciosos desde CDN -->
+    <script src="https://unpkg.com/lucide@0.344.0"></script>
+    <!-- SheetJS (Excel) con Estilos (xlsx-js-style) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <!-- Chart.js — versión fija (mismo criterio que OBS-2) -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+    <!-- ExcelJS (para embeber imágenes en Excel) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+</head>
+<body class="dark-mode">
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="overlay" style="display: none;">
+        <div class="loader-content">
+            <div class="spinner"></div>
+            <p>Procesando Auditoría...</p>
+            <span id="loading-details">Esto puede tardar unos segundos</span>
+        </div>
+    </div>
+
+    <!-- A-06: Banner de advertencia cuando localStorage está lleno (QuotaExceededError) -->
+    <div id="memory-warning-banner" style="display:none; position:fixed; top:0; left:0; right:0; z-index:9999;
+         background:linear-gradient(90deg,#f97316,#ef4444); color:#fff; font-size:0.85rem;
+         padding:10px 20px; text-align:center; gap:12px; align-items:center; justify-content:center;">
+        <i data-lucide="alert-triangle"></i>
+        <strong>⚠️ Memoria histórica llena.</strong>
+        Exporta el historial (menú ⋯) y luego límpialo para continuar guardando datos.
+        <button onclick="this.parentElement.style.display='none'"
+                style="background:rgba(255,255,255,0.2);border:none;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;margin-left:8px;">
+            ✕
+        </button>
+    </div>
+
+    <div class="background-blob-container">
+        <div class="blob blob-1"></div>
+        <div class="blob blob-2"></div>
+    </div>
+
+    <header class="glass-header">
+        <div class="logo">
+            <span class="logo-icon active"><i data-lucide="shield-check"></i></span>
+            <span class="logo-text">AQUASHIELD <strong>· ExportDesk</strong></span>
+        </div>
+        <nav>
+            <div id="status-indicator" class="status-badge">
+                <span class="dot pulse"></span>
+                <span class="label">Sistema Listo</span>
+            </div>
+            <button id="team-btn" class="secondary-btn" title="Gestionar Equipo / Directorio SAP" style="margin-left:12px;">
+                <i data-lucide="users"></i> Equipo
+            </button>
+        </nav>
+    </header>
+
+    <main>
+        <section id="hero">
+            <h1>AQUASHIELD <span>· ExportDesk</span></h1>
+            <p>Auditoría de Facturación · Legalización DUS · Control de Bill of Lading</p>
+        </section>
+
+        <section id="stats-grid">
+            <div class="stat-card glass animate-slide-up" style="--delay: 0.1s">
+                <div class="stat-header">
+                    <span class="stat-label">Total Procesados</span>
+                    <i data-lucide="check-circle" class="icon-green"></i>
+                </div>
+                <div class="stat-value" id="stat-total">0</div>
+                <div class="stat-change stat-sub" id="stat-sub-total">+0% hoy</div>
+            </div>
+            <div class="stat-card glass animate-slide-up" style="--delay: 0.2s">
+                <div class="stat-header">
+                    <span class="stat-label" id="stat-pending-label">Pendientes Comex</span>
+                    <i data-lucide="clock" class="icon-orange" id="stat-pending-icon"></i>
+                </div>
+                <div class="stat-value" id="stat-pending">0</div>
+                <div class="stat-change" id="stat-pending-desc">Urgencia detectada</div>
+                <div id="stat-pending-grupos" class="stat-grupos-breakdown"></div>
+            </div>
+            <div class="stat-card glass animate-slide-up" style="--delay: 0.3s">
+                <div class="stat-header">
+                    <span class="stat-label" id="stat-efficiency-label">% Cumplimiento</span>
+                    <i data-lucide="target" class="icon-blue" id="stat-efficiency-icon"></i>
+                </div>
+                <div class="stat-value" id="stat-efficiency">-%</div>
+                <div class="stat-change" id="stat-efficiency-desc">de pedidos procesados</div>
+            </div>
+        </section>
+
+        <section id="workspace">
+            <div class="widget-column">
+                <div class="widget-card glass">
+                    <div class="widget-header">
+                        <h3><i data-lucide="upload"></i> Cargar Archivos</h3>
+                        <p>Arrastra los Excel aquí para procesar</p>
+                    </div>
+                    
+                    <!-- Botones de ejecución (arriba, por módulo) -->
+                    <button id="run-audit-btn" class="primary-btn glow" disabled style="margin-bottom: 12px;">
+                        <i data-lucide="play"></i> Ejecutar Auditoría Comex
+                    </button>
+                    <button id="run-dus-btn" class="primary-btn glow" disabled style="margin-bottom: 12px; display:none;">
+                        <i data-lucide="play"></i> Ejecutar Legalización DUS
+                    </button>
+
+                    <div class="drop-zone smart-zone glass" id="drop-smart" data-type="SMART" multi="true">
+                        <i data-lucide="zap" class="icon-yellow"></i>
+                        <span>Carga Inteligente: Suelta Múltiples Archivos Aquí</span>
+                        <div class="file-info" id="smart-info">Auto-detectará DUS, SAP, BLs, y Maestros</div>
+                    </div>
+
+                    <div class="drop-zones-grid">
+                        <div class="drop-zone glass" id="drop-sap" data-type="SAP">
+                            <i data-lucide="file-spreadsheet"></i>
+                            <span>SAP (export.XLSX)</span>
+                            <div class="file-info">Ningún archivo</div>
+                        </div>
+                        <div class="drop-zone glass" id="drop-bl" data-type="BL" multi="true">
+                            <i data-lucide="container"></i>
+                            <span>Bill of Ladings</span>
+                            <div class="file-info">Soporta múltiples</div>
+                        </div>
+                        <div class="drop-zone glass" id="drop-maestro" data-type="MAESTRO">
+                            <i data-lucide="users"></i>
+                            <span>Asignación Clientes</span>
+                            <div class="file-info">Maestro de Responsables</div>
+                        </div>
+                        <div class="drop-zone glass" id="drop-procesados" data-type="PROCESADOS">
+                            <i data-lucide="clipboard-list"></i>
+                            <span>Procesados Manuales</span>
+                            <div class="file-info">Planilla de Excepciones</div>
+                        </div>
+                        <div class="drop-zone glass" id="drop-analistas" data-type="ANALISTAS">
+                            <i data-lucide="user-check"></i>
+                            <span>Analista Facturación (SAP)</span>
+                            <div class="file-info">Reporte Creado por</div>
+                        </div>
+                        <div class="drop-zone glass" id="drop-dus" data-type="DUS">
+                            <i data-lucide="file-check"></i>
+                            <span>Legalización DUS</span>
+                            <div class="file-info">Reporte Referencia/Estado</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="widget-card glass chart-widget">
+                    <div class="widget-header">
+                        <h3><i data-lucide="pie-chart"></i> Cumplimiento Global</h3>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="mainChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Gráfico de Carga por Analista -->
+                <div class="widget-card glass chart-widget" id="analyst-chart-widget">
+                    <div class="widget-header" style="flex-wrap:wrap; gap:8px;">
+                        <h3><i data-lucide="bar-chart-2"></i> Carga por Analista</h3>
+                        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                            <!-- Filtro Mes -->
+                            <select id="analyst-month-filter" class="glass-select">
+                                <option value="all">Todos los meses</option>
+                            </select>
+                            <!-- Multi-select analistas -->
+                            <div class="multi-select" id="analyst-select-container" style="position:relative;">
+                                <div class="multi-select-trigger glass" id="analyst-ms-trigger" style="min-width:160px;">
+                                    <span id="analyst-ms-label">👤 Todos</span>
+                                    <i data-lucide="chevron-down"></i>
+                                </div>
+                                <div class="multi-select-options glass" id="analyst-ms-options"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filtros de estado (toggles) -->
+                    <div id="analyst-status-filters" style="display:flex; gap:12px; flex-wrap:nowrap; align-items:center; margin-bottom:10px; padding:10px 0 4px;">
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;cursor:pointer;">
+                            <input type="checkbox" class="analyst-status-filter" value="procesados" checked style="accent-color:#34d399;">
+                            <span style="color:#34d399;">● Procesados/Legalizados</span>
+                        </label>
+                        <label style="display:flex;align-items:center;gap:6px;font-size:0.8rem;cursor:pointer;">
+                            <input type="checkbox" class="analyst-status-filter" value="pendientes" checked style="accent-color:#f87171;">
+                            <span style="color:#f87171;">● Pendientes</span>
+                        </label>
+                        <label id="analyst-sinzarpe-filter" style="display:none;align-items:center;gap:6px;font-size:0.8rem;cursor:pointer;">
+                            <input type="checkbox" class="analyst-status-filter" value="sin_zarpe" checked style="accent-color:#fb923c;">
+                            <span style="color:#fb923c;">● Sin Zarpe (DUS)</span>
+                        </label>
+                    </div>
+
+                    <div class="chart-container" style="max-height:280px;">
+                        <canvas id="analystChart"></canvas>
+                    </div>
+                    <div id="analyst-empty" class="empty-state" style="display:none;">
+                        <i data-lucide="users"></i>
+                        <p>Sin datos. Ejecuta un análisis o revisa la memoria.</p>
+                    </div>
+
+                    <!-- Botón de descarga (PNG + Excel) -->
+                    <button onclick="exportAnalystReport()" class="secondary-btn" style="margin-top:12px; width:100%; justify-content:center;">
+                        <i data-lucide="download"></i> Descargar Reporte (PNG + Excel)
+                    </button>
+                </div>
+
+                <!-- Widget: DUS Observaciones -->
+                <div class="widget-card glass obs-widget" id="dus-obs-widget" style="display:none;">
+                    <div class="widget-header" style="margin-bottom:10px;">
+                        <h3><i data-lucide="clipboard-list"></i> DUS Observaciones</h3>
+                        <span id="obs-count-badge" class="obs-count-badge"></span>
+                    </div>
+                    <!-- Dropzone -->
+                    <div class="obs-dropzone" id="obs-dropzone">
+                        <i data-lucide="upload-cloud"></i>
+                        <span>Arrastra aquí el reporte DUS</span>
+                        <small>Debe tener columna “Observaciones”</small>
+                        <input type="file" id="obs-file-input" accept=".xlsx,.xls" style="display:none;">
+                    </div>
+                    <!-- Lista de observaciones cargadas -->
+                    <div id="obs-list-container" style="display:none; margin-top:10px;">
+                        <div id="obs-list"></div>
+                    </div>
+                    <!-- Agregar observación manual -->
+                    <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+                        <input type="text" id="obs-input-pedido" class="glass-input obs-input" placeholder="N° Pedido">
+                        <input type="text" id="obs-input-nota"   class="glass-input obs-input" placeholder="Observación..." style="flex:1;">
+                        <button class="secondary-btn" onclick="addObsManual()" title="Agregar"><i data-lucide="plus"></i></button>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="widget-card glass results-widget">
+                <div class="widget-header-tabs glass">
+                    <div class="tabs-nav">
+                        <button class="tab-btn active" data-module="auditoria">
+                            <i data-lucide="table"></i> Auditoría Comex
+                        </button>
+                        <button class="tab-btn" data-module="dus">
+                            <i data-lucide="file-text"></i> Legalización DUS
+                        </button>
+                    </div>
+                    <!-- Filtro de Grupo inline -->
+                    <div class="group-filter-inline" id="group-filter-bar">
+                        <button class="group-btn active" data-grupo="" onclick="setActiveGrupo('')">👥 Todos</button>
+                        <button class="group-btn" data-grupo="congelado" onclick="setActiveGrupo('congelado')">❄️ Congelado</button>
+                        <button class="group-btn" data-grupo="fresco" onclick="setActiveGrupo('fresco')">🌿 Fresco</button>
+                        <span id="group-filter-info" class="group-filter-info"></span>
+                    </div>
+                    <div class="actions" style="flex-wrap: wrap; justify-content: flex-end; gap: 10px;">
+                        <!-- Auditoria Filter -->
+                        <div class="multi-select" id="status-multi-select" data-for="auditoria" style="display: flex; flex-direction: column; align-items: flex-end;">
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <div class="multi-select-trigger glass" id="ms-trigger" style="min-width: 220px;">
+                                    <span id="ms-label">🔍 Todos los Estados</span>
+                                    <i data-lucide="chevron-down"></i>
+                                </div>
+                                <button id="memory-toggle-btn" class="secondary-btn" title="Ver registros guardados en memoria">
+                                    <i data-lucide="database"></i> Memoria (<span id="memory-count-auditoria">0</span>)
+                                </button>
+                                <!-- Menú de opciones de memoria -->
+                                <div class="memory-menu" id="memory-menu-auditoria">
+                                    <button class="memory-menu-trigger secondary-btn" id="memory-menu-btn-auditoria" title="Opciones de memoria">&#8943;</button>
+                                    <div class="memory-menu-dropdown glass" id="memory-dropdown-auditoria">
+                                        <button onclick="exportMemory('auditoria')">
+                                            <i data-lucide="download"></i> Exportar Memoria
+                                        </button>
+                                        <hr style="border-color: rgba(255,255,255,0.1); margin: 4px 0;">
+                                        <button class="danger-option" onclick="clearMemory('auditoria')">
+                                            <i data-lucide="trash-2"></i> Eliminar Memoria
+                                        </button>
+                                    </div>
+                                </div>
+                                <button id="export-excel-btn" class="primary-btn" disabled title="Exportar pestaña actual">
+                                    <i data-lucide="download"></i> Exportar (Todos)
+                                </button>
+                            </div>
+                            <div class="multi-select-options glass" id="ms-options">
+                                <!-- Opciones dinámicas -->
+                            </div>
+                        </div>
+
+                        <!-- DUS Filter (initially hidden) -->
+                        <div class="multi-select" id="dus-multi-select" data-for="dus" style="display: none; flex-direction: column; align-items: flex-end;">
+                            <div style="display: flex; gap: 10px; align-items: center;">
+                                <div class="multi-select-trigger glass" id="ms-dus-trigger" style="min-width: 220px;">
+                                    <span id="ms-dus-label">🔍 Todos los DUS</span>
+                                    <i data-lucide="chevron-down"></i>
+                                </div>
+                                <button id="memory-toggle-btn-dus" class="secondary-btn" title="Ver registros guardados en memoria DUS">
+                                    <i data-lucide="database"></i> Memoria (<span id="memory-count-dus">0</span>)
+                                </button>
+                                <!-- Menú de opciones de memoria -->
+                                <div class="memory-menu" id="memory-menu-dus">
+                                    <button class="memory-menu-trigger secondary-btn" id="memory-menu-btn-dus" title="Opciones de memoria">&#8943;</button>
+                                    <div class="memory-menu-dropdown glass" id="memory-dropdown-dus">
+                                        <button onclick="exportMemory('dus')">
+                                            <i data-lucide="download"></i> Exportar Memoria
+                                        </button>
+                                        <hr style="border-color: rgba(255,255,255,0.1); margin: 4px 0;">
+                                        <button class="danger-option" onclick="clearMemory('dus')">
+                                            <i data-lucide="trash-2"></i> Eliminar Memoria
+                                        </button>
+                                    </div>
+                                </div>
+                                <button id="export-excel-btn-dus" class="primary-btn" disabled title="Exportar pestaña actual">
+                                    <i data-lucide="download"></i> Exportar (Todos)
+                                </button>
+                            </div>
+                            <div class="multi-select-options glass">
+                                <!-- Opciones dinámicas -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <!-- Search bar shared between modules -->
+                <div id="search-bar-container" class="search-bar-container">
+                    <div class="search-input-wrapper">
+                        <i data-lucide="search" class="search-icon"></i>
+                        <input type="text" id="table-search" class="search-input"
+                               placeholder="Buscar pedido, cliente, consignatario, responsable…"
+                               oninput="onSearchInput(this.value)">
+                        <button id="search-clear-btn" class="search-clear" onclick="onSearchInput('')" style="display:none;" title="Limpiar">✕</button>
+                    </div>
+                    <div id="search-count" class="search-count"></div>
+                </div>
+                <div class="table-container active" id="auditoria-results-container">
+                    <table id="results-table">
+                        <thead>
+                            <tr>
+                                <th data-col="estadoGeneral" class="sortable">ESTADO GENERAL</th>
+                                <th data-col="detalle" class="sortable">DETALLE</th>
+                                <th data-col="demora" class="sortable">DEMORA</th>
+                                <th data-col="tGestion" class="sortable">T. GESTIÓN</th>
+                                <th data-col="pedido" class="sortable">N° PEDIDO</th>
+                                <th data-col="cliente" class="sortable">CLIENTE</th>
+                                <th data-col="responsable" class="sortable">RESPONSABLE</th>
+                                <th data-col="fechaFac" class="sortable">FECHA FAC.</th>
+                                <th data-col="fechaBL" class="sortable">FECHA BL</th>
+                                <th>MOTIVO</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div id="table-empty-state" class="empty-state">
+                        <i data-lucide="database"></i>
+                        <p>Carga los datos para visualizar los resultados</p>
+                    </div>
+                </div>
+
+                <div class="table-container" id="dus-results-container">
+                    <table id="dus-table">
+                        <thead>
+                            <tr>
+                                <th data-col="estadoGeneral" class="sortable">ESTADO GENERAL</th>
+                                <th data-col="detalle" class="sortable">DETALLE</th>
+                                <th data-col="pedido" class="sortable">N° PEDIDO</th>
+                                <th data-col="consignatario" class="sortable">CONSIGNATARIO</th>
+                                <th data-col="responsable" class="sortable">RESPONSABLE</th>
+                                <th data-col="fechaFac" class="sortable">FECHA FAC.</th>
+                                <th id="obs-col-header" style="display:none;">OBSERVACIONES</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="app_v2.js"></script>
+    <script>
+      lucide.createIcons();
+    </script>
+
+    <!-- ===== MODAL: DIRECTORIO DE EQUIPO ===== -->
+    <div id="team-modal-overlay" class="modal-overlay" style="display:none;">
+        <div class="modal-panel glass" id="team-modal">
+            <div class="modal-header">
+                <h2><i data-lucide="users"></i> Directorio de Equipo</h2>
+                <button id="team-modal-close" class="secondary-btn"><i data-lucide="x"></i></button>
+            </div>
+            <p style="color:rgba(255,255,255,0.55); font-size:0.85rem; margin-bottom:16px;">
+                Asocia cada código SAP con el nombre completo del analista. Se guarda automáticamente.
+            </p>
+
+            <!-- Formulario agregar -->
+            <div class="team-form glass">
+                <input id="team-input-code" class="glass-input" type="text" placeholder="Código SAP (ej: MRAMIREZ)" maxlength="20">
+                <input id="team-input-name" class="glass-input" type="text" placeholder="Nombre completo (ej: Marcelo Ramírez)" maxlength="60">
+                <select id="team-input-grupo" class="glass-input" style="max-width:160px;">
+                    <option value="">Sin grupo</option>
+                    <option value="congelado">❄️ Congelado</option>
+                    <option value="fresco">🌿 Fresco</option>
+                </select>
+                <button id="team-add-btn" class="primary-btn">
+                    <i data-lucide="plus"></i> Agregar
+                </button>
+            </div>
+
+            <!-- Lista de miembros -->
+            <div id="team-list" class="team-list">
+                <!-- Renderizado dinámicamente -->
+            </div>
+
+            <div class="modal-footer">
+                <span id="team-count" style="color:rgba(255,255,255,0.4); font-size:0.8rem;"></span>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

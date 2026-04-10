@@ -1,0 +1,2743 @@
+/**
+ * AQUASHIELD · ExportDesk - Lógica Principal V2.1
+ * Auditoría Comex | Legalización DUS | Control de BL
+ *
+ * Fixes v2.1 (Auditoría Técnica):
+ *   C-03: Deduplicar BLs al agregar (evita acumulación de archivos repetidos)
+ *   C-04: Rechazar archivos no reconocidos en identifyExcel (no asumir BL)
+ *   C-05: escHtml() — sanitizar innerHTML en renderResults y renderDUS (XSS)
+ *   A-03: saveToMemory usa includes() directo en vez de regex de emojis
+ *   A-04: Reemplazar sentinel __ninguno__ por bandera booleana
+ *   A-06: Capturar QuotaExceededError en localStorage
+ *   M-02: Consolidar parseExcelDate/excelDateToJS en excelSerialToDate()
+ *   M-03: getEstadoGeneral separa ⚠️ Error Fecha de ✅ Procesado
+ *   M-05: procesarDUS() solo se ejecuta si hay datos DUS cargados
+ */
+
+const state = {
+    sap: null,
+    bls: [],
+    maestros: {
+        asignacion: null,
+        procesados: null,
+        analistas: null
+    },
+    dus: null,
+    results: [],
+    dusResults: [],
+    currentModule: 'auditoria',
+    chart: null,
+    fechaHoy: new Date(), // Fecha real del sistema
+    searchQuery: '',
+    sortState:    { col: null, dir: 'asc' },
+    sortStateDUS: { col: null, dir: 'asc' },
+    activeGrupo: null   // null = Todos, 'congelado', 'fresco'
+};
+
+// UI Elements
+const dropZones = {
+    smart: document.getElementById('drop-smart'),
+    sap: document.getElementById('drop-sap'),
+    bl: document.getElementById('drop-bl'),
+    maestro: document.getElementById('drop-maestro'),
+    procesados: document.getElementById('drop-procesados'),
+    analistas: document.getElementById('drop-analistas'),
+    dus: document.getElementById('drop-dus')
+};
+
+const runBtn = document.getElementById('run-audit-btn');
+const exportBtn = document.getElementById('export-excel-btn');
+const exportBtnDus = document.getElementById('export-excel-btn-dus');
+
+// --- Initialization ---
+document.addEventListener('DOMContentLoaded', () => {
+    setupDropZones();
+    initChart();
+    
+    runBtn.addEventListener('click', runAudit);
+    const runDusBtn = document.getElementById('run-dus-btn');
+    if (runDusBtn) runDusBtn.addEventListener('click', runDUS);
+    exportBtn.addEventListener('click', exportToExcel);
+    if (exportBtnDus) exportBtnDus.addEventListener('click', exportToExcel);
+
+    // Ordenamiento por columnas (click en encabezados)
+    document.querySelectorAll('th.sortable').forEach(th => {
+        th.addEventListener('click', () => {
+            const col = th.dataset.col;
+            const tableId = th.closest('table').id;
+            const stateKey = tableId === 'dus-table' ? 'sortStateDUS' : 'sortState';
+            const current = state[stateKey];
+            const newDir  = (current.col === col && current.dir === 'asc') ? 'desc' : 'asc';
+            state[stateKey] = { col, dir: newDir };
+            // Actualizar indicadores visuales
+            document.querySelectorAll(`#${tableId} th.sortable`).forEach(t => {
+                t.classList.remove('sort-asc', 'sort-desc');
+            });
+            th.classList.add(newDir === 'asc' ? 'sort-asc' : 'sort-desc');
+            // Re-renderizar
+            if (tableId === 'dus-table') {
+                renderDUS(getSelectedValues('dus-multi-select'));
+            } else {
+                renderResults(getSelectedValues('status-multi-select'));
+            }
+        });
+    });
+
+    // Multi-Select Logic
+    setupMultiSelect('status-multi-select', 'ms-trigger', 'ms-label', (selected) => {
+        renderResults(selected);
+        updateExportButtonText(selected);
+    });
+
+    setupMultiSelect('dus-multi-select', 'ms-dus-trigger', 'ms-dus-label', (selected) => {
+        renderDUS(selected);
+        updateExportButtonText(selected);
+    });
+
+    // Tab Logic
+    const tabBtns = document.querySelectorAll('.tab-btn');
+    tabBtns.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const module = btn.getAttribute('data-module');
+            switchTab(module);
+        });
+    });
+
+    // Aplicar estado inicial de widgets según módulo por defecto (auditoria)
+    switchTab('auditoria');
+
+    // Botones de Memoria - toggle vista
+    document.getElementById('memory-toggle-btn')?.addEventListener('click', () => toggleMemoryView('auditoria'));
+    document.getElementById('memory-toggle-btn-dus')?.addEventListener('click', () => toggleMemoryView('dus'));
+
+    // Menú tres puntos - toggle dropdown
+    ['auditoria', 'dus'].forEach(mod => {
+        const menuBtn = document.getElementById(`memory-menu-btn-${mod}`);
+        const dropdown = document.getElementById(`memory-dropdown-${mod}`);
+        if (menuBtn && dropdown) {
+            menuBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                // cerrar todos los otros dropdowns
+                document.querySelectorAll('.memory-menu-dropdown').forEach(d => {
+                    if (d !== dropdown) d.classList.remove('open');
+                });
+                dropdown.classList.toggle('open');
+            });
+        }
+    });
+
+    // Cerrar menú al hacer clic fuera (ignorar clicks dentro del dropdown)
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.memory-menu-dropdown') && !e.target.closest('.memory-menu-trigger')) {
+            document.querySelectorAll('.memory-menu-dropdown').forEach(d => d.classList.remove('open'));
+        }
+    });
+
+    // Cargar contadores de memoria al inicio
+    updateMemoryUI();
+
+    // Directorio de Equipo - modal
+    document.getElementById('team-btn')?.addEventListener('click', openTeamModal);
+    document.getElementById('team-modal-close')?.addEventListener('click', closeTeamModal);
+    document.getElementById('team-modal-overlay')?.addEventListener('click', (e) => {
+        if (e.target.id === 'team-modal-overlay') closeTeamModal();
+    });
+    document.getElementById('team-add-btn')?.addEventListener('click', addTeamMember);
+    // Enter en inputs
+    ['team-input-code', 'team-input-name'].forEach(id => {
+        document.getElementById(id)?.addEventListener('keydown', e => { if (e.key === 'Enter') addTeamMember(); });
+    });
+
+    // Gráfico de Analistas
+    seedTeamDirectory(); // precarga el equipo por defecto
+    initAnalystChart();
+
+    // Filtros del gráfico de analistas
+    document.getElementById('analyst-month-filter')?.addEventListener('change', refreshAnalystChart);
+
+    // Multi-select analistas
+    setupAnalystMultiSelect();
+
+    // Status filters del gráfico de analistas
+    document.querySelectorAll('.analyst-status-filter').forEach(cb => {
+        cb.addEventListener('change', refreshAnalystChart);
+    });
+
+    console.log("AQUASHIELD · ExportDesk cargado correctamente");
+});
+
+function setupMultiSelect(containerId, triggerId, labelId, onChange) {
+    const container = document.getElementById(containerId);
+    const trigger = document.getElementById(triggerId);
+    if (!container || !trigger) return;
+
+    // Trigger ONCLICK robusto y libre de conflictos
+    trigger.onclick = (e) => {
+        e.stopPropagation();
+        const isOpen = container.classList.contains('open');
+        // Cerrar todos primero
+        document.querySelectorAll('.multi-select').forEach(ms => ms.classList.remove('open'));
+        // Si no estaba abierto, abrirlo ahora
+        if (!isOpen) container.classList.add('open');
+    };
+
+    // Actualizamos los checkboxes (esto ocurre cada vez que se regeneran los datos)
+    const checkboxes = container.querySelectorAll('.ms-option input');
+    checkboxes.forEach(cb => {
+        cb.onchange = () => {
+            const checked = Array.from(container.querySelectorAll('input:checked')).map(i => i.value);
+            updateMultiSelectLabel(checked, labelId);
+            onChange(checked);
+        };
+    });
+}
+
+// Cierre global al hacer clic fuera de cualquier multi-select
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.multi-select')) {
+        document.querySelectorAll('.multi-select').forEach(ms => ms.classList.remove('open'));
+    }
+});
+
+function switchTab(module) {
+    state.currentModule = module;
+    
+    // UI Updates - Tabs
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.getAttribute('data-module') === module));
+    
+    const isAuditoria = module === 'auditoria';
+    document.getElementById('auditoria-results-container').style.display = isAuditoria ? 'block' : 'none';
+    document.getElementById('dus-results-container').style.display = isAuditoria ? 'none' : 'block';
+    
+    document.querySelector('[data-for="auditoria"]').style.display = isAuditoria ? 'block' : 'none';
+    document.querySelector('[data-for="dus"]').style.display = isAuditoria ? 'none' : 'block';
+
+    // --- Mostrar/Ocultar widgets según módulo ---
+    // Auditoría Comex: SAP + BLs + Asignación + Procesados + Analistas (sin DUS)
+    // Legalización DUS: SAP + Analistas + DUS (sin BLs, sin Asignación, sin Procesados)
+    // NOTA: código unificado en un solo bloque — el primer bloque antiguo era redundante
+    // y tenía un ternario muerto (.closest('.drop-zone') siempre verdadero para IDs de drop-zone)
+    ['drop-bl', 'drop-maestro', 'drop-procesados'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = isAuditoria ? '' : 'none';
+    });
+    const elDUS = document.getElementById('drop-dus');
+    if (elDUS) elDUS.style.display = isAuditoria ? 'none' : '';
+
+    // Actualizar texto de zona inteligente
+    const smartInfo = document.getElementById('smart-info');
+    if (smartInfo) {
+        smartInfo.innerText = isAuditoria
+            ? 'Auto-detectará DUS, SAP, BLs, y Maestros'
+            : 'Auto-detectará SAP, Analista Facturación y DUS';
+    }
+
+    // Botón ejecutar: mostrar el correcto según módulo
+    const runDusBtnEl = document.getElementById('run-dus-btn');
+    if (runBtn)      { runBtn.style.display      = isAuditoria ? '' : 'none'; runBtn.disabled = true; runBtn.classList.remove('glow'); }
+    if (runDusBtnEl) { runDusBtnEl.style.display = isAuditoria ? 'none' : ''; runDusBtnEl.disabled = true; runDusBtnEl.classList.remove('glow'); }
+    checkReadyState();
+
+    const selected = isAuditoria ? getSelectedValues('status-multi-select') : getSelectedValues('dus-multi-select');
+    updateExportButtonText(selected);
+    
+    // Update Chart for Current Module
+    if (isAuditoria) {
+        updateChart(state.results);
+    } else {
+        updateChartForDUS(state.dusResults);
+    }
+    
+    updateStats();
+
+    // Actualizar gráfico de analistas según módulo activo
+    refreshAnalystFilters();
+    refreshAnalystChart();
+
+    // Mostrar/ocultar filtro "Sin Zarpe" segun modulo
+    const szFilter = document.getElementById('analyst-sinzarpe-filter');
+    if (szFilter) szFilter.style.display = isAuditoria ? 'none' : 'flex';
+
+    // Widget DUS Observaciones: visible solo en modulo DUS
+    const obsWidget = document.getElementById('dus-obs-widget');
+    if (obsWidget) {
+        obsWidget.style.display = isAuditoria ? 'none' : '';
+        if (!isAuditoria && !obsWidget._obsSetup) {
+            setupObsWidget();
+            obsWidget._obsSetup = true;
+        }
+    }
+}
+
+function updateDynamicFilters(results, containerId, triggerId, labelId, renderFn, module) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const optionsContainer = container.querySelector('.multi-select-options');
+    if (!optionsContainer) return;
+
+    // Extraer estados únicos presentes en los resultados
+    // Para Auditoría: agrupar por ESTADO GENERAL en lugar de ESTATUS_FINAL individual
+    const isAuditMod = (module === 'auditoria');
+    let states;
+    if (isAuditMod) {
+        // Generar opciones únicas de ESTADO GENERAL
+        const egSet = new Set(results.map(r => getEstadoGeneral(String(r.ESTATUS_FINAL)).label));
+        states = Array.from(egSet).sort();
+    } else {
+        states = Array.from(new Set(results.map(r => String(r.ESTATUS_FINAL).trim()))).sort();
+    }
+    
+    if (states.length === 0) {
+        optionsContainer.innerHTML = '<div style="padding:10px; opacity:0.5; font-size:0.8rem">No hay datos</div>';
+        return;
+    }
+
+    optionsContainer.innerHTML = states.map(s => {
+        return `
+            <label class="ms-option">
+                <input type="checkbox" value="${s}" checked> 
+                <span>${s}</span>
+            </label>
+        `;
+    }).join('');
+
+    // Re-setup events
+    setupMultiSelect(containerId, triggerId, labelId, (selected) => {
+        renderFn(selected);
+        updateExportButtonText(selected);
+        updateMultiSelectLabel(selected, labelId);
+    });
+
+    // Reset label
+    updateMultiSelectLabel(states, labelId);
+}
+
+function updateMultiSelectLabel(selected, labelId = 'ms-label') {
+    const label = document.getElementById(labelId);
+    if (!label) return;
+    
+    if (selected.length === 0) {
+        label.innerText = "🔍 Ninguno";
+    } else {
+        const container = label.closest('.multi-select');
+        const total = container.querySelectorAll('.ms-option').length;
+        
+        if (selected.length === total) {
+            label.innerText = labelId === 'ms-label' ? "🔍 Todos los Estados" : "🔍 Todos los DUS";
+        } else if (selected.length === 1) {
+            label.innerText = `🔍 ${selected[0]}`;
+        } else {
+            label.innerText = `🔍 ${selected.length} seleccionados`;
+        }
+    }
+}
+
+// --- Drop Zone Logic ---
+function setupDropZones() {
+    Object.entries(dropZones).forEach(([key, zone]) => {
+        // Prevenir comportamiento por defecto
+        ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+            zone.addEventListener(eventName, e => {
+                e.preventDefault();
+                e.stopPropagation();
+            }, false);
+        });
+
+        zone.addEventListener('dragover', () => {
+            zone.classList.add('drag-over');
+        });
+
+        zone.addEventListener('dragleave', () => {
+            zone.classList.remove('drag-over');
+        });
+
+        zone.addEventListener('drop', (e) => {
+            zone.classList.remove('drag-over');
+            const files = Array.from(e.dataTransfer.files);
+            handleFiles(key, files, zone);
+        });
+
+        zone.addEventListener('click', () => {
+            const input = document.createElement('input');
+            input.type = 'file';
+            input.multiple = zone.hasAttribute('multi');
+            input.onchange = (e) => {
+                const files = Array.from(e.target.files);
+                handleFiles(key, files, zone);
+            };
+            input.click();
+        });
+    });
+}
+
+async function handleFiles(type, files, zone) {
+    const infoDiv = zone ? zone.querySelector('.file-info') : null;
+    if (!files || files.length === 0) return;
+
+    try {
+        if (type === 'smart') {
+            if (infoDiv) infoDiv.innerText = `Procesando ${files.length} archivos...`;
+            let successCount = 0;
+            for (const file of files) {
+                const data = await readExcel(file);
+                const detectedType = identifyExcel(data, file.name);
+                if (!detectedType) {
+                    // C-04: archivo no reconocido — mostrar aviso en la zona inteligente
+                    // P-04: escHtml en file.name para evitar XSS con nombres de archivo maliciosos
+                    if (infoDiv) infoDiv.innerHTML += `<br><span style="color:#f97316">⚠️ "${escHtml(file.name)}" no reconocido — arrástralo a la zona correcta</span>`;
+                    continue;
+                }
+                const targetZone = dropZones[detectedType];
+                assignDataToType(detectedType, data, targetZone, file.name);
+                successCount++;
+            }
+            if (infoDiv) infoDiv.innerHTML = `<span style="color:#f97316">✅ ${successCount} Archivos Autofilados</span>`;
+            zone.style.borderColor = '#f97316';
+            zone.style.background = 'rgba(249, 115, 22, 0.05)';
+        } else {
+            for (const file of files) {
+                if (infoDiv) infoDiv.innerText = `Leyendo ${file.name}...`;
+                const data = await readExcel(file);
+                assignDataToType(type, data, zone, file.name);
+            }
+        }
+    } catch (err) {
+        console.error("Error procesando Excel:", err);
+        if (infoDiv) infoDiv.innerText = `❌ Error: ${err.message}`;
+        if (zone) zone.style.borderColor = '#f87171';
+    }
+    
+    checkReadyState();
+}
+
+function identifyExcel(data, filename = "") {
+    const fn = String(filename).toLowerCase();
+    
+    // 1. Detección Primaria por Nombre de Archivo
+    if (fn.includes('export') || fn.includes('flujo') || fn.includes('sap.xlsx') || fn.includes('1.export')) return 'sap';
+    if (fn.includes('dus') || fn.includes('6.dus')) return 'dus';
+    if (fn.includes('asignacion') || fn.includes('asignación') || fn.includes('maestro clientes')) return 'maestro';
+    if (fn.includes('analista')) return 'analistas';
+    if (fn.includes('procesados') || fn.includes('excepciones')) return 'procesados';
+    if (fn.includes('bill') || fn.includes('bls') || fn.includes('lading')) return 'bl';
+
+    // 2. Detección Secundaria por Columnas (Si el nombre es genérico)
+    if (data && data.length > 0) {
+        for (let i = 0; i < Math.min(data.length, 5); i++) {
+            const keys = Object.values(data[i]).map(v => String(v).toLowerCase());
+            const hasMatch = (col) => keys.some(v => v.includes(col.toLowerCase()));
+            
+            if (hasMatch('texto breve de material') || hasMatch('clase de movimiento') || hasMatch('nº doc.compras')) return 'sap';
+            if (hasMatch('estado dus') || hasMatch('aprob.dus')) return 'dus';
+            if (hasMatch('analista asignado') || (hasMatch('cliente') && hasMatch('responsable'))) return 'maestro';
+            if (hasMatch('factura') && hasMatch('creado por')) return 'analistas';
+            if (hasMatch('estado auditoría') && hasMatch('motivo')) return 'procesados';
+            if (hasMatch('bl') || hasMatch('bill') || hasMatch('lading') || hasMatch('pedido')) return 'bl';
+        }
+    }
+    
+    // C-04: Rechazar archivos no reconocidos — NO asumir BL.
+    // Devolver null para que assignDataToType lo ignore y pida al usuario arrastrar manualmente.
+    console.warn(`[identifyExcel] Archivo no reconocido: "${filename}". Se ignorará.`);
+    return null;
+}
+
+function assignDataToType(type, data, zone, filename = "") {
+    const infoDiv = zone ? zone.querySelector('.file-info') : null;
+    // C-04: ignorar archivos que no pudieron identificarse
+    // P-04: escHtml en filename para evitar XSS
+    if (!type) {
+        if (infoDiv) infoDiv.innerHTML = `<span style="color:#f97316">⚠️ No reconocido: ${escHtml(filename)}.<br>Arrástralo a la zona correcta.</span>`;
+        if (zone) zone.style.borderColor = '#f97316';
+        return;
+    }
+    if (type === 'sap') {
+        state.sap = data;
+        if(infoDiv) { infoDiv.innerHTML = `<span style="color:#4ade80">✅ SAP cargado</span>`; zone.style.borderColor = '#4ade80'; zone.style.background = 'rgba(74, 222, 128, 0.05)'; }
+    } else if (type === 'bl') {
+        state.bls.push(...data);
+        // C-03: Deduplicar inmediatamente — si el mismo pedido aparece más de una vez,
+        // la última versión gana (útil cuando se sube un BL corregido en la misma sesión)
+        const blDedup = new Map();
+        state.bls.forEach(row => {
+            const key = cleanPedido(row.Pedido);
+            if (key) blDedup.set(key, row);
+        });
+        state.bls = Array.from(blDedup.values());
+        if(infoDiv) { infoDiv.innerHTML = `<span style="color:#4ade80">✅ ${state.bls.length} registros BL únicos</span>`; zone.style.borderColor = '#4ade80'; zone.style.background = 'rgba(74, 222, 128, 0.05)'; }
+    } else if (type === 'maestro') {
+        state.maestros.asignacion = data;
+        if(infoDiv) { infoDiv.innerHTML = `<span style="color:#4ade80">✅ Maestro Clientes OK</span>`; zone.style.borderColor = '#4ade80'; zone.style.background = 'rgba(74, 222, 128, 0.05)'; }
+    } else if (type === 'procesados') {
+        state.maestros.procesados = data;
+        if(infoDiv) { infoDiv.innerHTML = `<span style="color:#4ade80">✅ Maestro Excepciones OK</span>`; zone.style.borderColor = '#4ade80'; zone.style.background = 'rgba(74, 222, 128, 0.05)'; }
+    } else if (type === 'analistas') {
+        state.maestros.analistas = data;
+        if(infoDiv) { infoDiv.innerHTML = `<span style="color:#4ade80">✅ Analistas SAP OK</span>`; zone.style.borderColor = '#4ade80'; zone.style.background = 'rgba(74, 222, 128, 0.05)'; }
+    } else if (type === 'dus') {
+        state.dus = data;
+        if(infoDiv) { infoDiv.innerHTML = `<span style="color:#4ade80">✅ DUS cargado OK</span>`; zone.style.borderColor = '#4ade80'; zone.style.background = 'rgba(74, 222, 128, 0.05)'; }
+    }
+}
+
+
+function readExcel(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+                const sheetName = workbook.SheetNames[0];
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: "" });
+                resolve(json);
+            } catch (err) { reject(err); }
+        };
+        reader.onerror = (err) => reject(err);
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+function checkReadyState() {
+    const module = state.currentModule;
+    const dusBtnEl = document.getElementById('run-dus-btn');
+
+    if (module === 'dus') {
+        // DUS solo necesita: SAP + Analistas.
+        const ready = !!(state.sap && state.maestros.analistas);
+        if (dusBtnEl) {
+            dusBtnEl.disabled = !ready;
+            dusBtnEl.classList.toggle('glow', ready);
+        }
+    } else {
+        // Auditoría Comex necesita: SAP + al menos 1 BL
+        const ready = !!(state.sap && state.bls.length > 0);
+        runBtn.disabled = !ready;
+        runBtn.classList.toggle('glow', ready);
+    }
+}
+
+function showLoading(msg = "Procesando...") {
+    const overlay = document.getElementById('loading-overlay');
+    const details = document.getElementById('loading-details');
+    overlay.style.display = 'flex';
+    details.innerText = msg;
+}
+
+function hideLoading() {
+    document.getElementById('loading-overlay').style.display = 'none';
+}
+
+function runAudit() {
+    // Redirigir al motor DUS si estamos en ese módulo
+    if (state.currentModule === 'dus') {
+        if (!state.sap || !state.maestros.analistas) {
+            alert('Para DUS necesitas cargar: SAP (export.XLSX) y Analista Facturación (SAP).');
+            return;
+        }
+        runDUS();
+        return;
+    }
+    if (!state.sap || state.bls.length === 0) return;
+    
+    showLoading("Cruzando datos y calculando KPIs...");
+    
+    // Timeout para permitir que el navegador dibuje el "Cargando"
+    setTimeout(() => {
+        try {
+            const sapData = state.sap;
+            const blData = state.bls;
+            const asignacion = state.maestros.asignacion || [];
+            const procesados = state.maestros.procesados || [];
+
+            // P-01: TODAS las Maps deben tener guard `if (key)` antes de .set()
+            // Sin esto, cleanPedido("") retorna "" y se crea una entrada fantasma
+            // que matchea cualquier otro pedido que también sea "" → cruces incorrectos
+            const blMap = new Map();
+            blData.forEach(row => {
+                const key = cleanPedido(row.Pedido);
+                if (key) blMap.set(key, row);
+            });
+
+            const manualMap = new Map();
+            procesados.forEach(row => {
+                const key = cleanPedido(row['PEDIDO FLUJO']);
+                if (key) manualMap.set(key, row.MOTIVO || "Validado sin motivo");
+            });
+
+            const asignacionMap = new Map();
+            const terrestreSet = new Set();
+            if (state.maestros.asignacion) {
+                state.maestros.asignacion.forEach(row => {
+                    if (row.Cliente) {
+                        const key = normalizeText(row.Cliente);
+                        asignacionMap.set(key, row.Responsable || row.Analista);
+                        if ((row.Responsable || row.Analista || "").toLowerCase().includes('terrestre')) {
+                            terrestreSet.add(key);
+                        }
+                    }
+                });
+            }
+
+            const analistaMap = new Map();
+            const analistaPedidoMap = new Map();
+            const sapUserMap = new Map(); // ID -> Nombre
+
+            if (state.maestros.analistas) {
+                state.maestros.analistas.forEach(row => {
+                    const factura = row['N° Factura'] || row['Factura'] || row['Folio'];
+                    const pedido = row['N° Pedido'] || row['N Pedido'] || row['Pedido'] || row['Orden'];
+                    const creador = row['Creado por'] || row['Analista'] || row['Nombre de usuario'];
+                    const userId = row['Usuario'] || row['SAP User'];
+
+                    // P-01: guard de llave vacía en Maps de analistas
+                    const facKey = cleanPedido(factura);
+                    const pedKey = cleanPedido(pedido);
+                    if (facKey && creador) analistaMap.set(facKey, creador);
+                    if (pedKey && creador) analistaPedidoMap.set(pedKey, creador);
+                    
+                    // Si encontramos un ID y un nombre, lo guardamos para traducir en DUS
+                    if (userId && creador && String(userId).includes('020')) {
+                        sapUserMap.set(String(userId).trim(), creador);
+                    }
+                });
+            }
+            
+            // También podemos sacar mapeos de SAP general si hay IDs
+            if (state.sap) {
+                state.sap.forEach(row => {
+                    const id = row['Usuario'] || row['ID'];
+                    const nombre = row['Nombre de usuario'] || row['Creado por'];
+                    if (id && nombre && String(id).includes('020')) {
+                        sapUserMap.set(String(id).trim(), nombre);
+                    }
+                });
+            }
+
+            state.sapUserMap = sapUserMap; // Persistir para uso en procesarDUS
+
+            const results = [];
+            const processedOrders = new Set();
+
+            // Pre-scan: pedidos con al menos una factura válida en el reporte SAP.
+            // Permite priorizar la fila "facturado" sobre la fila "pendiente" del mismo pedido.
+            const pedidosConFactura = new Set();
+            sapData.forEach(row => {
+                const ped = cleanPedido(row['NPedido'] || row['N°Pedido']);
+                const fac = cleanValue(row['° Factura'] || row['N Factura'] || row['Folio Factura'] || row['Factura'] || row['Folio']);
+                if (ped && fac && fac !== '0') pedidosConFactura.add(ped);
+            });
+
+            sapData.forEach(row => {
+                const descMatch = (row['Descripcin'] || row['Descripción'] || "");
+                const desc = String(descMatch);
+                if (!desc.includes('@') || desc.includes('#')) return;
+
+                const pedidoOriginal = row['NPedido'] || row['N°Pedido'];
+                const pedidoClean = cleanPedido(pedidoOriginal);
+                
+                const folioFacturaRaw = row['N° Factura'] || row['N Factura'] || row['Folio Factura'] || row['Factura'] || row['Folio'] || row['Doc.facturación'] || row['Documento de facturación'] || row['Doc. fact.'] || row['Documento'];
+                const folioKeyRaw = folioFacturaRaw ? cleanPedido(folioFacturaRaw) : "NO_FAC";
+                
+                // DE-DUPLICACIÓN INTELIGENTE: Ignorar combinaciones idénticas de Pedido+Factura
+                // Esto permite que si un pedido tiene 2 facturas diferentes, ambas salgan en el reporte.
+                const dedupeKey = `${pedidoClean}_${folioKeyRaw}`;
+                if (processedOrders.has(dedupeKey)) return;
+                processedOrders.add(dedupeKey);
+
+                const cliente = row['Nombre Solicitante'];
+                const clienteKey = normalizeText(cliente);
+                
+                const blMatch = blMatchSearch(pedidoClean, blMap);
+                const motivoManual = manualMap.get(pedidoClean);
+
+                const fechaFactura = parseExcelDate(row['Fecha Factura']);
+                const folioKey = folioKeyRaw === "NO_FAC" ? null : folioKeyRaw;
+                const fechaBL = blMatch ? parseExcelDate(blMatch.FechaCreacion) : null;
+
+                const semaforo = calculateSemaforo(fechaFactura);
+                
+                // Lógica de Responsable
+                let responsable = "Sin Asignar";
+                const sapUserFact = folioKey ? analistaMap.get(folioKey) : null;
+                const sapUserPed = analistaPedidoMap.get(pedidoClean);
+                let fallbackAnalista = asignacionMap.get(clienteKey);
+                
+                if (!fallbackAnalista) {
+                    // Búsqueda difusa si no hay match directo
+                    for (const [key, val] of asignacionMap) {
+                        if (clienteKey.includes(key) || key.includes(clienteKey)) {
+                            fallbackAnalista = val;
+                            break;
+                        }
+                    }
+                }
+
+                if (terrestreSet.has(clienteKey)) {
+                    responsable = "🚚 Procesado Terrestre";
+                } else if (sapUserFact) {
+                    responsable = sapUserFact;
+                } else if (sapUserPed) {
+                    responsable = sapUserPed;
+                } else if (fallbackAnalista) {
+                    responsable = fallbackAnalista;
+                }
+
+                // Cálculo de Estatus y Demora
+                let demora = (fechaFactura && !isNaN(fechaFactura)) ? Math.floor((state.fechaHoy - fechaFactura) / (1000 * 60 * 60 * 24)) : 0;
+                if (demora > 10000) demora = 0; 
+                
+                const tGestion = (fechaBL && fechaFactura) ? Math.floor((fechaBL - fechaFactura) / (1000 * 60 * 60 * 24)) : null;
+
+                let estatus = "❌ Pendiente";
+                if (!folioFacturaRaw || String(folioFacturaRaw).trim() === "" || !fechaFactura) {
+                    // Si este pedido tiene factura en otra fila del mismo reporte, omitir el duplicado pendiente
+                    if (pedidosConFactura.has(pedidoClean)) return;
+                    estatus = "📦 Pendiente Facturación";
+                    demora = 0;
+                } else if (semaforo === "💀 Rojo Crítico") {
+                    estatus = "⚠️ Error Fecha";
+                } else if (blMatch) {
+                    estatus = "✅ Procesado";
+                } else if (responsable.includes('Terrestre')) {
+                    estatus = "🚚 Procesado Terrestre";
+                } else if (motivoManual) {
+                    estatus = "⚠️ Validado Manualmente";
+                }
+
+                results.push({
+                    ESTATUS_FINAL: estatus,
+                    DEMORA: demora,
+                    T_GESTIÓN: tGestion,
+                    PEDIDO: pedidoClean,
+                    CLIENTE: cliente,
+                    RESPONSABLE: responsable,
+                    FECHA_FACTURA: fechaFactura && !isNaN(fechaFactura) ? fechaFactura : null,
+                    FECHA_BL: fechaBL,
+                    MOTIVO: motivoManual || "",
+                    BL: blMatch ? blMatch.BL : ""
+                });
+            });
+
+            state.results = results;
+            // M-05: solo procesar DUS si hay datos cargados (evita trabajo innecesario)
+            state.dusResults = state.dus ? procesarDUS() : [];
+            
+            // Actualizar Filtros Dinámicos
+            updateDynamicFilters(state.results, 'status-multi-select', 'ms-trigger', 'ms-label', renderResults, 'auditoria');
+            updateDynamicFilters(state.dusResults, 'dus-multi-select', 'ms-dus-trigger', 'ms-dus-label', renderDUS, 'dus');
+            
+            const selectedAuditoria = Array.from(new Set(results.map(r => r.ESTATUS_FINAL)));
+            const selectedDUS = Array.from(new Set(state.dusResults.map(r => r.ESTATUS_FINAL)));
+            
+            renderResults(selectedAuditoria);
+            renderDUS(selectedDUS);
+            
+            updateStats();
+            if (state.currentModule === 'auditoria') {
+                updateChart(results);
+            } else {
+                updateChartForDUS(state.dusResults);
+            }
+            if(exportBtn) exportBtn.disabled = false;
+            if(exportBtnDus) exportBtnDus.disabled = false;
+            // Auto-guardar en memoria los registros procesados/legalizados
+            saveToMemory('auditoria', state.results);
+            saveToMemory('dus', state.dusResults);
+            updateMemoryUI();
+        } catch (err) {
+            console.error(err);
+            alert("Error en la auditoría: " + err.message);
+        } finally {
+            hideLoading();
+        }
+    }, 100);
+}
+
+/**
+ * Motor independiente para Legalización DUS.
+ * Solo requiere: SAP (export) + Analista Facturación + (opcional) Asignación Clientes + DUS.
+ */
+function runDUS() {
+    showLoading("Procesando Legalización DUS...");
+    setTimeout(() => {
+        try {
+            state.dusResults = procesarDUS();
+
+            updateDynamicFilters(state.dusResults, 'dus-multi-select', 'ms-dus-trigger', 'ms-dus-label', renderDUS, 'dus');
+            const selectedDUS = Array.from(new Set(state.dusResults.map(r => r.ESTATUS_FINAL)));
+            renderDUS(selectedDUS);
+            updateStats();
+            updateChartForDUS(state.dusResults);
+            if (exportBtnDus) exportBtnDus.disabled = false;
+            // Auto-guardar en memoria los registros legalizados
+            saveToMemory('dus', state.dusResults);
+            updateMemoryUI();
+        } catch (err) {
+            console.error(err);
+            alert("Error en DUS: " + err.message);
+        } finally {
+            hideLoading();
+        }
+    }, 100);
+}
+
+// =============================================================
+// MOTOR DE MEMORIA PERSISTENTE (localStorage)
+// Guarda pedidos procesados/legalizados entre sesiones.
+// =============================================================
+
+const MEMORY_KEYS = {
+    auditoria: 'accomex_memory_auditoria',
+    dus:       'accomex_memory_dus'
+};
+
+// Estados que califican para ser guardados en memoria
+const MEMORY_STATUSES = {
+    auditoria: ['✅ Procesado', '⚠️ Validado', '🚚 Procesado Terrestre'],
+    dus:       ['✅ Legalizado']
+};
+
+let memoryViewActive = { auditoria: false, dus: false };
+
+/** Carga la memoria del módulo indicado. Retorna un objeto { pedido: {...} } */
+function loadMemory(module) {
+    try {
+        const mem = JSON.parse(localStorage.getItem(MEMORY_KEYS[module]) || '{}');
+        // OBS-3: migración automática de memoria DUS pre-P-06
+        // Las entradas viejas tenían PEDIDO = rawReferencia (ej: "REF-4500012345/4500012346")
+        // Las nuevas usan PEDIDO = pedidoClean (ej: "4500012345").
+        // Si encontramos llaves no-numéricas en la memoria DUS, re-keyeamos automáticamente.
+        if (module === 'dus' && !mem._migrated_p06) {
+            let changed = false;
+            const newMem = {};
+            Object.entries(mem).forEach(([key, val]) => {
+                // Si la llave contiene letras o caracteres no numéricos, es formato viejo
+                if (/[^0-9]/.test(key)) {
+                    const digits = key.match(/\d{7,10}/);
+                    const cleanKey = digits ? digits[0] : key;
+                    // Solo migrar si no colisiona con una entrada ya existente
+                    if (!mem[cleanKey] && !newMem[cleanKey]) {
+                        val.PEDIDO_RAW = val.PEDIDO_RAW || val.PEDIDO || key;
+                        val.PEDIDO = cleanKey;
+                        newMem[cleanKey] = val;
+                        changed = true;
+                    } else {
+                        newMem[key] = val; // mantener si colisiona
+                    }
+                } else {
+                    newMem[key] = val;
+                }
+            });
+            if (changed) {
+                newMem._migrated_p06 = true;
+                try { localStorage.setItem(MEMORY_KEYS[module], JSON.stringify(newMem)); }
+                catch { /* silenciar si QuotaExceeded */ }
+                // Eliminar flag interno antes de retornar (no es un pedido)
+                delete newMem._migrated_p06;
+                return newMem;
+            }
+            // Marcar como migrado aunque no haya cambios (evitar recorrer cada vez)
+            mem._migrated_p06 = true;
+            try { localStorage.setItem(MEMORY_KEYS[module], JSON.stringify(mem)); }
+            catch { /* silenciar */ }
+        }
+        // Limpiar flag interno del objeto retornado (no contaminar conteos)
+        delete mem._migrated_p06;
+        return mem;
+    } catch { return {}; }
+}
+
+/** Guarda/fusiona nuevos registros procesados en la memoria */
+function saveToMemory(module, results) {
+    const mem = loadMemory(module);
+    const validStatuses = MEMORY_STATUSES[module];
+    let added = 0;
+
+    results.forEach(r => {
+        const status = r.ESTATUS_FINAL || '';
+        // A-03: comparación directa por includes() — evita regex de emojis multi-codepoint
+        // que puede no funcionar correctamente en todos los navegadores/SO
+        const isFinal = validStatuses.some(s => status.includes(s));
+        if (!isFinal) return;
+
+        const key = String(r.PEDIDO || '').trim();
+        if (!key) return;
+
+        mem[key] = {
+            ...r,
+            FECHA_FACTURA: (r.FECHA_FACTURA instanceof Date)
+                ? r.FECHA_FACTURA.toISOString()
+                : (r.FECHA_FACTURA || ''),
+            FECHA_BL: (r.FECHA_BL instanceof Date)
+                ? r.FECHA_BL.toISOString()
+                : (r.FECHA_BL || ''),
+            savedAt: new Date().toISOString().slice(0, 10)
+        };
+        added++;
+    });
+
+    // A-06: capturar QuotaExceededError — localStorage tiene ~5-10 MB de límite
+    try {
+        // OBS-3: preservar flag de migración para que loadMemory no recorra cada vez
+        if (module === 'dus') mem._migrated_p06 = true;
+        localStorage.setItem(MEMORY_KEYS[module], JSON.stringify(mem));
+    } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+            console.warn('⚠️ Memoria llena (localStorage). Exporta el historial y límpialo.');
+            const banner = document.getElementById('memory-warning-banner');
+            if (banner) { banner.style.display = 'flex'; }
+            else { alert('⚠️ La memoria histórica está llena. Exporta y limpia el historial para continuar guardando.'); }
+        }
+    }
+    // OBS-4: limpiar el flag interno antes de contar (no es un pedido real)
+    delete mem._migrated_p06;
+    return Object.keys(mem).length;
+}
+
+/** Actualiza el contador del botón Memoria y muestra/oculta el botón de limpiar */
+function updateMemoryUI() {
+    ['auditoria', 'dus'].forEach(mod => {
+        const mem = loadMemory(mod);
+        const count = Object.keys(mem).length;
+        const countEl = document.getElementById(`memory-count-${mod}`);
+        const clearBtn = document.getElementById(mod === 'auditoria' ? 'memory-clear-btn' : 'memory-clear-btn-dus');
+        if (countEl) countEl.textContent = count;
+        if (clearBtn) clearBtn.style.display = count > 0 ? 'flex' : 'none';
+    });
+}
+
+/** Limpia la memoria del módulo actual con confirmación */
+/** Exporta la memoria del módulo a un archivo Excel (también sirve como respaldo) */
+function exportMemory(module) {
+    const mem = loadMemory(module);
+    const records = Object.values(mem);
+    if (records.length === 0) {
+        alert('No hay registros en memoria para exportar.');
+        return;
+    }
+
+    const isAuditoria = module === 'auditoria';
+    const sheetName = isAuditoria ? 'Memoria Auditoría' : 'Memoria DUS';
+
+    const wsData = isAuditoria
+        ? records.map(r => ({
+            'N° PEDIDO':      r.PEDIDO || '',
+            'ESTATUS FINAL':  r.ESTATUS_FINAL || '',
+            'CLIENTE':        r.CLIENTE || '',
+            'RESPONSABLE':    r.RESPONSABLE || '',
+            'FECHA FAC.':     r.FECHA_FACTURA ? new Date(r.FECHA_FACTURA) : '',
+            'FECHA BL':       r.FECHA_BL ? new Date(r.FECHA_BL) : '',
+            'MOTIVO':         r.MOTIVO || '',
+            'GUARDADO EL':    r.savedAt || ''
+          }))
+        : records.map(r => ({
+            'N° PEDIDO':      r.PEDIDO || '',
+            'ESTATUS FINAL':  r.ESTATUS_FINAL || '',
+            'CONSIGNATARIO':  r.CONSIGNATARIO || '',
+            'RESPONSABLE':    r.RESPONSABLE || '',
+            'FECHA FACTURA':  r.FECHA_FACTURA ? new Date(r.FECHA_FACTURA) : '',
+            'FACTURA SAP':    r.FACTURA_SAP || '',
+            'GUARDADO EL':    r.savedAt || ''
+          }));
+
+    const ws = XLSX.utils.json_to_sheet(wsData, { cellDates: true });
+
+    // Formato de fecha a columnas con "FECHA"
+    if (ws['!ref']) {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        for (let C = range.s.c; C <= range.e.c; C++) {
+            const hCell = ws[XLSX.utils.encode_cell({c: C, r: 0})];
+            if (hCell && /fecha/i.test(String(hCell.v || ''))) {
+                for (let R = 1; R <= range.e.r; R++) {
+                    const ref = XLSX.utils.encode_cell({c: C, r: R});
+                    if (ws[ref] && ws[ref].v instanceof Date) {
+                        ws[ref].t = 'd';
+                        ws[ref].z = 'DD-MM-YYYY';
+                    }
+                }
+            }
+        }
+        // Estilo de cabecera
+        for (let C = range.s.c; C <= range.e.c; C++) {
+            const ref = XLSX.utils.encode_cell({c: C, r: 0});
+            if (ws[ref]) {
+                ws[ref].s = {
+                    fill: { fgColor: { rgb: '1E293B' } },
+                    font: { color: { rgb: 'FFFFFF' }, bold: true }
+                };
+            }
+        }
+    }
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    const fecha = new Date().toISOString().slice(0, 10);
+    XLSX.writeFile(wb, `RESPALDO_${sheetName.replace(' ', '_')}_${fecha}.xlsx`);
+}
+
+function clearMemory(module) {
+    const mem = loadMemory(module);
+    const count = Object.keys(mem).length;
+    if (count === 0) { alert('La memoria ya está vacía.'); return; }
+    if (!confirm(`¿Eliminar los ${count} registros de memoria de ${module === 'dus' ? 'Legalización DUS' : 'Auditoría Comex'}?\n\nEsta acción no se puede deshacer.`)) return;
+    localStorage.removeItem(MEMORY_KEYS[module]);
+    memoryViewActive[module] = false;
+    updateMemoryUI();
+    // Re-renderizar sin memoria
+    if (module === 'auditoria') {
+        const btn = document.getElementById('memory-toggle-btn');
+        if (btn) btn.classList.remove('active');
+        renderResults(getSelectedValues('status-multi-select'));
+    } else {
+        const btn = document.getElementById('memory-toggle-btn-dus');
+        if (btn) btn.classList.remove('active');
+        renderDUS(getSelectedValues('dus-multi-select'));
+    }
+}
+
+/** Toggle: muestra u oculta los registros de memoria junto a los actuales */
+function toggleMemoryView(module) {
+    memoryViewActive[module] = !memoryViewActive[module];
+    const btnId = module === 'auditoria' ? 'memory-toggle-btn' : 'memory-toggle-btn-dus';
+    const btn = document.getElementById(btnId);
+    if (btn) btn.classList.toggle('active', memoryViewActive[module]);
+    // Re-renderizar con o sin memoria
+    if (module === 'auditoria') {
+        renderResults(getSelectedValues('status-multi-select'));
+    } else {
+        renderDUS(getSelectedValues('dus-multi-select'));
+    }
+}
+
+/** Devuelve registros de memoria que NO están en los resultados actuales */
+function getMemoryOnlyRecords(module, currentResults) {
+    if (!memoryViewActive[module]) return [];
+    const mem = loadMemory(module);
+    const currentKeys = new Set(currentResults.map(r => String(r.PEDIDO || '').trim()));
+    return Object.values(mem)
+        .filter(r => !currentKeys.has(String(r.PEDIDO || '').trim()))
+        .map(r => ({
+            ...r,
+            _fromMemory: true,
+            FECHA_FACTURA: r.FECHA_FACTURA ? new Date(r.FECHA_FACTURA) : null,
+            FECHA_BL: r.FECHA_BL ? new Date(r.FECHA_BL) : null
+        }));
+}
+
+// C-05: Función de escape HTML para sanitizar datos de Excel antes de inyectarlos en el DOM.
+// Previene XSS si una celda del Excel contiene HTML o scripts.
+function escHtml(str) {
+    return String(str == null ? '' : str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
+function normalizeText(text) {
+    if (!text) return "";
+    return text.toString().toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "") // Quita acentos
+        .replace(/[^a-z0-9]/g, "");     // Quita símbolos y espacios (trim innecesario: ya no quedan espacios)
+}
+
+/**
+ * Limpia pedidos y facturas: elimina ceros a la izquierda y espacios.
+ */
+function cleanValue(val) {
+    if (val === null || val === undefined) return "";
+    return String(val).trim().replace(/^0+/, '').split('.')[0];
+}
+
+// Búsqueda robusta en el mapa de BLs
+function blMatchSearch(pedidoClean, blMap) {
+    return blMap.get(pedidoClean);
+}
+
+// M-02: función canónica consolidada para convertir fechas Excel → JS Date.
+// Reemplaza tanto parseExcelDate como excelDateToJS (que eran duplicadas con pequeñas diferencias).
+function excelSerialToDate(val) {
+    if (!val) return null;
+    if (val instanceof Date) return val;
+    if (typeof val === 'number') return new Date(Math.round((val - 25569) * 86400 * 1000));
+    const d = new Date(val);
+    return isNaN(d.getTime()) ? null : d;
+}
+// Alias de compatibilidad para que el código existente siga funcionando sin cambios masivos
+const parseExcelDate = excelSerialToDate;
+
+function calculateSemaforo(fecha) {
+    if (!fecha) return "⚪ N/A";
+    // P-05: usar state.fechaHoy en vez de new Date() para consistencia con DEMORA.
+    // Sin esto, si el dashboard queda abierto de un día al otro, SEMÁFORO usa "mañana"
+    // pero DEMORA sigue usando "ayer" → discrepancia de 1 día en los umbrales.
+    const hoy = new Date(state.fechaHoy);
+    hoy.setHours(0, 0, 0, 0);
+    if (fecha > hoy) return "💀 Rojo Crítico";
+    const dias = Math.floor((hoy - fecha) / (1000 * 60 * 60 * 24));
+    if (dias <= 3) return "🟢 Verde";
+    if (dias <= 7) return "🟠 Naranja";
+    return "🔴 Rojo";
+}
+
+function renderResults(selectedStatuses = []) {
+    const tbody = document.querySelector('#results-table tbody');
+    const emptyState = document.getElementById('table-empty-state');
+    let data = state.results;
+
+    // Agregar registros de memoria que no están en los resultados actuales
+    const memOnly = getMemoryOnlyRecords('auditoria', data);
+    const allData = [...data, ...memOnly];
+
+    if (allData.length > 0) emptyState.style.display = 'none';
+
+    let filtered = allData;
+    if (selectedStatuses.length > 0) {
+        const totalOptions = document.querySelectorAll('#status-multi-select .ms-option').length;
+        if (selectedStatuses.length < totalOptions) {
+            // Filtrar por ESTADO GENERAL (agrupado), no por ESTATUS_FINAL individual
+            filtered = filtered.filter(res =>
+                selectedStatuses.includes(getEstadoGeneral(res.ESTATUS_FINAL).label)
+            );
+        }
+    }
+
+    // Aplicar búsqueda de texto
+    filtered = applySearch(filtered, state.searchQuery, false);
+    // Aplicar filtro de grupo
+    const gFilter = getGrupoAnalysts();
+    if (gFilter) filtered = filtered.filter(r => gFilter.has(String(r.RESPONSABLE || '').toUpperCase().trim()));
+    // Aplicar orden de columna
+    const ss = state.sortState;
+    filtered = sortResults(filtered, ss.col, ss.dir);
+
+    tbody.innerHTML = filtered.map(res => {
+        const eg = getEstadoGeneral(res.ESTATUS_FINAL);
+        // OBS-6: escHtml para fechas string (evita XSS si Excel envía texto en vez de fecha)
+        const fFac = (res.FECHA_FACTURA instanceof Date) ? res.FECHA_FACTURA.toLocaleDateString() : escHtml(res.FECHA_FACTURA || '-');
+        const fBL  = (res.FECHA_BL instanceof Date) ? res.FECHA_BL.toLocaleDateString() : escHtml(res.FECHA_BL || '-');
+        // C-05: escHtml() sanitiza datos de Excel (evita XSS si una celda contiene HTML)
+        const ePed  = escHtml(res.PEDIDO);
+        const eCli  = escHtml(res.CLIENTE);
+        const eResp = escHtml(res.RESPONSABLE);
+        const eMot  = escHtml(res.MOTIVO);
+        const eEst  = escHtml(res.ESTATUS_FINAL);
+        return `
+        <tr class="${res._fromMemory ? 'memory-row' : ''}">
+            <td><span class="badge ${eg.badgeClass}">${eg.label}</span></td>
+            <td title="${eEst}"><span class="badge ${getBadgeClass(res.ESTATUS_FINAL)}">${eEst}</span></td>
+            <td>${res.DEMORA ?? '-'}</td>
+            <td>${res.T_GESTIÓN !== null && res.T_GESTIÓN !== undefined ? res.T_GESTIÓN : '-'}</td>
+            <td title="${ePed}">${ePed}</td>
+            <td title="${eCli}">${eCli || '-'}</td>
+            <td title="${eResp}">${eResp}</td>
+            <td style="white-space:nowrap">${fFac}</td>
+            <td style="white-space:nowrap">${fBL}</td>
+            <td title="${eMot}">${eMot || '-'}</td>
+        </tr>`;
+    }).join('');
+    document.getElementById('table-empty-state').style.display = filtered.length ? 'none' : 'flex';
+    // Actualizar contador de búsqueda
+    const countEl = document.getElementById('search-count');
+    if (countEl) countEl.textContent = state.searchQuery ? `${filtered.length} resultado${filtered.length !== 1 ? 's' : ''}` : '';
+}
+
+/** Clasifica ESTADO_GENERAL a partir del ESTATUS_FINAL */
+function getEstadoGeneral(estatusFinal) {
+    const s = String(estatusFinal || '');
+    // M-03: Error Fecha PRIMERO — antes de verificar '⚠' para no clasificarlo como Procesado
+    // '⚠️ Error Fecha' contiene '⚠' pero NO debe contarse como Procesado
+    if (s.includes('Error') || s.includes('💀')) {
+        return { label: '❌ Error Fecha', badgeClass: 'badge-critical' };
+    }
+    // Procesados: ✅ Procesado, 🚚 Terrestre, ⚠️ Validado Manualmente
+    if (s.includes('✅') || s.includes('🚚') || s.includes('Validado')) {
+        return { label: '✅ Procesado', badgeClass: 'badge-green' };
+    }
+    return { label: '❌ Pendiente', badgeClass: 'badge-red' };
+}
+
+// ── Utilidades de búsqueda y orden ──────────────────────────
+
+/** Filtra un array de resultados por texto libre */
+function applySearch(arr, query, isDUS = false) {
+    if (!query || !query.trim()) return arr;
+    const q = query.toLowerCase().trim();
+    return arr.filter(r => {
+        const fields = isDUS
+            ? [r.PEDIDO, r.PEDIDO_RAW, r.CONSIGNATARIO, r.RESPONSABLE, r.ESTATUS_FINAL, r.ESTADO_DUS_RAW]
+            : [r.PEDIDO, r.CLIENTE, r.RESPONSABLE, r.ESTATUS_FINAL, r.MOTIVO];
+        return fields.some(f => f && String(f).toLowerCase().includes(q));
+    });
+}
+
+/** Ordena un array de resultados por columna y dirección */
+function sortResults(arr, col, dir) {
+    if (!col) return arr;
+    return [...arr].sort((a, b) => {
+        let av, bv;
+        switch (col) {
+            case 'estadoGeneral': av = (a._isDUS ? getDUSEstadoGeneral(a.ESTATUS_FINAL).label : getEstadoGeneral(a.ESTATUS_FINAL).label); bv = (b._isDUS ? getDUSEstadoGeneral(b.ESTATUS_FINAL).label : getEstadoGeneral(b.ESTATUS_FINAL).label); break;
+            case 'detalle':       av = String(a.ESTATUS_FINAL); bv = String(b.ESTATUS_FINAL); break;
+            case 'demora':        av = a.DEMORA ?? -Infinity; bv = b.DEMORA ?? -Infinity; break;
+            case 'tGestion':      av = a.T_GESTIÓN ?? -Infinity; bv = b.T_GESTIÓN ?? -Infinity; break;
+            case 'pedido':        av = String(a.PEDIDO || ''); bv = String(b.PEDIDO || ''); break;
+            case 'cliente':       av = String(a.CLIENTE || ''); bv = String(b.CLIENTE || ''); break;
+            case 'consignatario': av = String(a.CONSIGNATARIO || ''); bv = String(b.CONSIGNATARIO || ''); break;
+            case 'responsable':   av = String(a.RESPONSABLE || ''); bv = String(b.RESPONSABLE || ''); break;
+            case 'fechaFac':      av = a.FECHA_FACTURA || a.FECHA_FACTURA_DATE || 0; bv = b.FECHA_FACTURA || b.FECHA_FACTURA_DATE || 0; break;
+            case 'fechaBL':       av = a.FECHA_BL || 0; bv = b.FECHA_BL || 0; break;
+            default:              return 0;
+        }
+        if (av < bv) return dir === 'asc' ? -1 : 1;
+        if (av > bv) return dir === 'asc' ?  1 : -1;
+        return 0;
+    });
+}
+
+/** Handler del buscador en tiempo real */
+function onSearchInput(value) {
+    state.searchQuery = value;
+    const clearBtn = document.getElementById('search-clear-btn');
+    if (clearBtn) clearBtn.style.display = value ? 'flex' : 'none';
+    const input = document.getElementById('table-search');
+    if (input && input.value !== value) input.value = value;
+    if (state.currentModule === 'auditoria') {
+        renderResults(getSelectedValues('status-multi-select'));
+        updateExportButtonText(getSelectedValues('status-multi-select'));
+    } else {
+        renderDUS(getSelectedValues('dus-multi-select'));
+        updateExportButtonText(getSelectedValues('dus-multi-select'));
+    }
+}
+
+function getBadgeClass(estatus) {
+    if (estatus.includes('✅')) return 'badge-green';
+    if (estatus.includes('Validado')) return 'badge-green'; // Manual validation also green
+    if (estatus.includes('🚚')) return 'badge-blue';
+    if (estatus.includes('📦')) return 'badge-yellow'; // Facturación
+    if (estatus.includes('IVV')) return 'badge-orange'; // IVV specific orange
+    if (estatus.includes('❌')) return 'badge-red';
+    if (estatus.includes('Error')) return 'badge-critical';
+    return 'badge-orange';
+}
+
+function updateStats() {
+    const isAuditoria = state.currentModule === 'auditoria';
+    let activeData = isAuditoria ? state.results : state.dusResults;
+
+    // Aplicar filtro de grupo a los datos activos
+    const gFilter = getGrupoAnalysts();
+    if (gFilter && activeData) {
+        activeData = activeData.filter(r => gFilter.has(String(r.RESPONSABLE || '').toUpperCase().trim()));
+    }
+
+    // Total procesados: suma memoria del módulo activo (fuente de verdad histórica)
+    const mem = loadMemory(isAuditoria ? 'auditoria' : 'dus');
+    const memTotal = Object.keys(mem).length;
+
+    let processed = 0, pending = 0;
+    const data = activeData || [];
+    const total = data.length;
+
+    if (isAuditoria) {
+        // getEstadoGeneral ya agrupa terrestres y validados en '✅ Procesado'
+        // NO restar por separado — eso generaba doble descuento y pending < real
+        processed = data.filter(r => getEstadoGeneral(r.ESTATUS_FINAL).label === '✅ Procesado').length;
+        pending   = data.filter(r => getEstadoGeneral(r.ESTATUS_FINAL).label === '❌ Pendiente').length;
+
+        document.getElementById('stat-pending-label').innerText = 'Pendientes Comex';
+        document.getElementById('stat-pending-icon').setAttribute('data-lucide', 'clock');
+        document.getElementById('stat-pending-desc').innerText = 'Sin BL o factura';
+    } else {
+        processed = data.filter(r => getDUSEstadoGeneral(r.ESTATUS_FINAL).label === '✅ Legalizado').length;
+        pending   = data.filter(r => !['✅ Legalizado', '❌ Anulado'].includes(getDUSEstadoGeneral(r.ESTATUS_FINAL).label)).length;
+
+        document.getElementById('stat-pending-label').innerText = 'Pendientes DUS';
+        document.getElementById('stat-pending-icon').setAttribute('data-lucide', 'file-warning');
+        document.getElementById('stat-pending-desc').innerText = 'DUS no legalizados';
+    }
+
+    // KPI 1: Total Procesados = memoria acumulada (histórico)
+    const statTotalEl = document.getElementById('stat-total');
+    if (statTotalEl) {
+        statTotalEl.innerText = memTotal;
+        const subEl = statTotalEl.closest('.stat-card')?.querySelector('.stat-sub');
+        if (subEl) subEl.innerText = processed > 0 ? `+${processed} esta sesión` : 'Desde historial';
+    }
+
+    // KPI 2: Pendientes (valor filtrado por grupo activo)
+    document.getElementById('stat-pending').innerText = pending > 0 ? pending : (total > 0 ? 0 : '-');
+
+    // KPI 2 sub: Desglose por grupo — siempre desde datos COMPLETOS para mostrar ambos grupos
+    const gruposEl = document.getElementById('stat-pending-grupos');
+    if (gruposEl) {
+        const fullData = (isAuditoria ? state.results : state.dusResults) || [];
+        // Misma lógica exacta que el número grande
+        const isPendingFn = isAuditoria
+            ? r => getEstadoGeneral(r.ESTATUS_FINAL).label === '❌ Pendiente'
+            : r => !['✅ Legalizado', '❌ Anulado'].includes(getDUSEstadoGeneral(r.ESTATUS_FINAL).label);
+
+        // Helper: códigos de un grupo específico
+        const getGroupCodes = (grupo) => {
+            const dir = loadTeamDirectory();
+            const s = new Set();
+            Object.entries(dir).forEach(([code, entry]) => {
+                const g = typeof entry === 'string' ? null : (entry.grupo || null);
+                if (g === grupo) s.add(code.toUpperCase().trim());
+            });
+            return s;
+        };
+
+        const cCodes = getGroupCodes('congelado');
+        const fCodes = getGroupCodes('fresco');
+        const pendingC = cCodes.size > 0 ? fullData.filter(r => isPendingFn(r) && cCodes.has(String(r.RESPONSABLE || '').toUpperCase().trim())).length : null;
+        const pendingF = fCodes.size > 0 ? fullData.filter(r => isPendingFn(r) && fCodes.has(String(r.RESPONSABLE || '').toUpperCase().trim())).length : null;
+
+        if (pendingC !== null || pendingF !== null) {
+            gruposEl.innerHTML =
+                (pendingC !== null ? `<span class="grupo-pill congelado" title="Pendientes Congelado">❄️ ${pendingC}</span>` : '') +
+                (pendingF !== null ? `<span class="grupo-pill fresco" title="Pendientes Fresco">🌿 ${pendingF}</span>` : '');
+        } else {
+            gruposEl.innerHTML = '';
+        }
+    }
+
+    // KPI 3: % Cumplimiento
+    const pct = total > 0 ? ((processed / total) * 100).toFixed(1) + '%' : '-%';
+    const effLabelEl = document.getElementById('stat-efficiency-label');
+    const effValEl   = document.getElementById('stat-efficiency');
+    const effDescEl  = document.getElementById('stat-efficiency-desc');
+    if (effLabelEl) effLabelEl.innerText = isAuditoria ? '% Cumplimiento' : '% Legalización';
+    if (effValEl)   effValEl.innerText   = pct;
+    if (effDescEl)  effDescEl.innerText  = total > 0 ? `${processed} de ${total} ${isAuditoria ? 'procesados' : 'legalizados'}` : 'de pedidos procesados';
+
+    // Color del KPI 3 según % (verde/amarillo/rojo)
+    const effCard = effValEl?.closest('.stat-card');
+    if (effCard && total > 0) {
+        const pctNum = processed / total;
+        effCard.style.borderColor = pctNum >= 0.8 ? 'rgba(74,222,128,0.3)'
+            : pctNum >= 0.5 ? 'rgba(251,191,36,0.3)'
+            : 'rgba(248,113,113,0.3)';
+    }
+
+    if (window.lucide) lucide.createIcons();
+}
+
+
+function initChart() {
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    state.chart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Procesados', 'Terrestres', 'Pendientes', 'Errores'],
+            datasets: [{
+                data: [0, 0, 0, 0],
+                backgroundColor: ['#4ade80', '#60a5fa', '#fb923c', '#f87171'],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            cutout: '70%',
+            plugins: { legend: { position: 'bottom', labels: { color: '#a0a0a0' } } },
+            maintainAspectRatio: false
+        }
+    });
+}
+
+function updateChart(results) {
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    if (state.chart) state.chart.destroy();
+    // P-08: early-return si no hay resultados (igual que updateChartForDUS)
+    if (!results || results.length === 0) return;
+
+    const counts = {
+        'Procesados': results.filter(r => r.ESTATUS_FINAL.includes('✅')).length,
+        'Pendientes': results.filter(r => r.ESTATUS_FINAL.includes('❌')).length,
+        'Pend. Factura': results.filter(r => r.ESTATUS_FINAL.includes('📦')).length,
+        'Terrestres': results.filter(r => r.ESTATUS_FINAL.includes('🚚')).length,
+        'Verificados': results.filter(r => r.ESTATUS_FINAL.includes('Validado')).length,
+        'Errores': results.filter(r => r.ESTATUS_FINAL.includes('Error')).length
+    };
+
+    const total = results.length;
+    const labels = Object.keys(counts).map(key => {
+        const pct = ((counts[key] / total) * 100).toFixed(1);
+        return `${key} (${pct}%)`;
+    });
+    const data = Object.values(counts);
+
+    state.chart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: [
+                    '#10b981', // Verde Procesado
+                    '#ef4444', // Rojo Pendiente
+                    '#f59e0b', // Amarillo Factura
+                    '#3b82f6', // Azul Terrestre
+                    '#059669', // Verde Esmeralda (Manual)
+                    '#f97316'  // Naranja Error
+                ],
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: { color: 'rgba(255,255,255,0.7)', font: { size: 11 } }
+                }
+            },
+            cutout: '70%'
+        }
+    });
+}
+
+function cleanPedido(val) {
+    if (!val) return "";
+    // M-02 related: mismo criterio que limpiar_pedido en Python
+    // Eliminar parte decimal, limpiar ceros iniciales
+    let s = String(val).split('.')[0].trim();
+    while (s.startsWith('0')) s = s.substring(1).trim();
+    // A-01 JS: si queda vacío (era "0" o "000"), retornar "" para que no se use como llave
+    return s; // "" será ignorado por los Map.set() que hacen guard: if (key)
+}
+
+/**
+ * Buscador inteligente de columnas por nombre o posición.
+ */
+function getVal(row, aliases, indexFallback = -1) {
+    if (!row) return null;
+    
+    // 1. Intento por Nombres (Ignora mayúsculas y caracteres especiales)
+    for (const alias of aliases) {
+        if (row[alias] !== undefined && row[alias] !== null && String(row[alias]).trim() !== "") {
+            return row[alias];
+        }
+        
+        // Búsqueda difusa (ej: Normaliza "N°Pedido" a "npedido")
+        const cleanAlias = normalizeText(alias);
+        for (const key in row) {
+            if (normalizeText(key) === cleanAlias && row[key] !== undefined && row[key] !== null) {
+                return row[key];
+            }
+        }
+    }
+
+    // 2. Intento por Índice (Fallback si los nombres fallan)
+    if (indexFallback >= 0) {
+        if (Array.isArray(row) && row[indexFallback] !== undefined) return row[indexFallback];
+        const keys = Object.keys(row);
+        if (keys[indexFallback] !== undefined) return row[keys[indexFallback]];
+    }
+
+    return null;
+}
+
+// M-02: excelDateToJS ahora es un alias de excelSerialToDate (función canónica definida arriba)
+const excelDateToJS = excelSerialToDate;
+
+function procesarDUS() {
+    if (!state.dus || state.dus.length === 0) return [];
+
+
+    // 1. Mapa: Factura -> Analista (Desde "5.Analista que facturo.XLSX")
+    //    Estructura: Col1=Factura, Col2=Fecha factura, Col3=Creado por
+    const analistaFactMap = new Map();
+    if (state.maestros.analistas) {
+        state.maestros.analistas.forEach(row => {
+            const fac = cleanValue(getVal(row, ['Factura', 'Folio'], 0));
+            const usr = getVal(row, ['Creado por', 'Nombre de usuario', 'Analista'], 2);
+            if (fac && usr) analistaFactMap.set(fac, usr);
+        });
+    }
+
+    // 2. Mapa: Pedido -> Factura (Desde "1.export.XLSX")
+    //    Col4=N°Pedido (índice 3), Col12=N° Factura (índice 11)
+    const sapBridgeMap = new Map();
+    const sapDateMap = new Map();
+    if (state.sap) {
+        state.sap.forEach(row => {
+            const ped = cleanValue(getVal(row, ['N°Pedido', 'NPedido'], 3));
+            const fac = cleanValue(getVal(row, ['N° Factura', 'Folio Factura'], 11));
+            const fechaRaw = getVal(row, ['Fecha Factura'], 14);
+            if (ped && fac) {
+                sapBridgeMap.set(ped, fac);
+                if (fechaRaw) sapDateMap.set(ped, excelDateToJS(fechaRaw));
+            }
+        });
+    }
+
+    // 3. PROCESAR CADA LÍNEA DEL DUS
+    //    Col1=id(0), Col2=Referencia(1), Col3=Consignatario(2), Col4=Estado DUS(3), Col5=Vía Transporte(4), Col6=Fecha Zarpe(5)?
+    return state.dus.map((row, idx) => {
+        const rawReferencia = String(getVal(row, ['Referencia'], 1) || '');
+        const consignatarioStr = getVal(row, ['Consignatario'], 2) || 'N/A';
+        const estadoDUS = String(getVal(row, ['Estado DUS'], 3) || 'Pendiente');
+        const viaTransporte = getVal(row, ['Vía Transporte', 'Via Transporte', 'Via de Transporte'], 4) || '';
+
+        // Fecha zarpe (columna 5 si existe)
+        const zarpeRaw = getVal(row, ['Fecha Zarpe', 'Zarpe', 'F. Zarpe'], 5);
+        const fechaZarpe = zarpeRaw ? excelDateToJS(zarpeRaw) : null;
+        const zarpeEsFutura = fechaZarpe instanceof Date && !isNaN(fechaZarpe) && fechaZarpe > new Date();
+        const sinZarpe = !zarpeRaw || zarpeEsFutura;
+
+        // CLASIFICACIÓN EXPLÍCITA por valor de "Estado DUS"
+        let estatusFinal;
+
+        // ✅ Legalizado: DUS completamente cerrado aduaneramente
+        if (estadoDUS.includes('Finalizado') || estadoDUS.includes('(Legalizado)')) {
+            estatusFinal = '✅ Legalizado';
+
+        // ✅ Legalizado: Pend. Presentación (IVV) = legalizado aduaneramente, solo falta trámite tributario IVV
+        } else if (estadoDUS.includes('IVV')) {
+            estatusFinal = '✅ Legalizado';
+
+        // ⚠️ Sin Zarpe: nave aún no ha zarpado
+        } else if (
+            estadoDUS.includes('Pend. Ingreso') ||
+            estadoDUS.includes('Zarpe Nave') ||
+            estadoDUS.includes('Pend. Zarpe')
+        ) {
+            estatusFinal = '⚠️ Sin Zarpe';
+
+        // ❌ Anulado: DUS cancelado
+        } else if (estadoDUS.includes('Anulado')) {
+            estatusFinal = '❌ Anulado';
+
+        // ❌ Pendiente: Pend. Aceptación, Pend. Presentación DUS AT, Pend. Legalización, Rechazado, etc.
+        } else {
+            estatusFinal = '❌ Pendiente Legalización';
+        }
+
+        // Extraer todos los números que parecen pedidos (7-10 dígitos)
+        const pedidoCandidates = rawReferencia.match(/\d{7,10}/g) || [];
+        const pedidoClean = pedidoCandidates[0] || rawReferencia;
+
+        let analistaFinal = null;
+        let facturaEncontrada = 'N/A';
+        let metodoCruce = 'Sin Asignar';
+        let fechaFacturaStr = '-';
+        let fechaFacturaDate = null;
+
+        for (const cand of pedidoCandidates) {
+            const cleanCand = cleanValue(cand);
+
+            const facturaSAP = sapBridgeMap.get(cleanCand);
+
+            if (facturaSAP) {
+                facturaEncontrada = facturaSAP;
+                const facturador = analistaFactMap.get(facturaSAP);
+                if (facturador) {
+                    analistaFinal = facturador;
+                    metodoCruce = 'Facturador SAP';
+                }
+                const fObj = sapDateMap.get(cleanCand);
+                if (fObj instanceof Date && !isNaN(fObj)) {
+                    fechaFacturaStr = fObj.toLocaleDateString();
+                    fechaFacturaDate = fObj;
+                }
+            }
+
+            if (analistaFinal) break;
+        }
+
+        if (!analistaFinal) {
+            analistaFinal = viaTransporte || 'PENDIENTE';
+            metodoCruce = viaTransporte ? 'Vía Transporte' : 'Sin Asignar';
+        }
+
+        return {
+            ESTATUS_FINAL:       estatusFinal,
+            ESTADO_DUS_RAW:      estadoDUS,          // texto original de la planilla
+            // P-06: usar pedidoClean como PEDIDO en vez de rawReferencia.
+            // rawReferencia puede ser "REF-4500012345/4500012346" que cambia de formato
+            // entre archivos DUS, generando llaves duplicadas en la memoria persistente.
+            PEDIDO:              pedidoClean,
+            PEDIDO_RAW:          rawReferencia,       // guardamos el original para display
+            CONSIGNATARIO:       consignatarioStr,
+            RESPONSABLE:         analistaFinal,
+            FECHA_FACTURA:       fechaFacturaStr,
+            FECHA_FACTURA_DATE:  fechaFacturaDate,
+            FACTURA_SAP:         facturaEncontrada,
+            METODO_CRUCE:        metodoCruce
+        };
+    });
+}
+
+
+
+function renderDUS(selected = []) {
+    const tbody = document.querySelector('#dus-table tbody');
+    if (!tbody) return;
+
+    let data = state.dusResults;
+    // Agregar registros de memoria que no están en los resultados actuales
+    const memOnly = getMemoryOnlyRecords('dus', data);
+    const allData = [...data, ...memOnly];
+
+    const containerId = 'dus-multi-select';
+    const totalOptions = document.querySelectorAll(`#${containerId} .ms-option`).length;
+
+    let filtered = allData;
+    if (selected.length > 0 && selected.length < totalOptions) {
+        filtered = filtered.filter(d => selected.some(s => d.ESTATUS_FINAL === s || d.ESTATUS_FINAL.includes(s)));
+    }
+
+    // Aplicar búsqueda de texto
+    filtered = applySearch(filtered, state.searchQuery, true);
+    // Aplicar filtro de grupo
+    const gFilter = getGrupoAnalysts();
+    if (gFilter) filtered = filtered.filter(d => gFilter.has(String(d.RESPONSABLE || '').toUpperCase().trim()));
+    // Aplicar orden de columna
+    const ss = state.sortStateDUS;
+    filtered = sortResults(filtered.map(d => ({...d, _isDUS: true})), ss.col, ss.dir);
+
+    // Columna de Observaciones (oculta su cabecera si no hay obs aplicables)
+    const obs = loadObs();
+    const hasAnyObs = filtered.some(d => {
+        const eg = getDUSEstadoGeneral(d.ESTATUS_FINAL);
+        return eg.label !== '\u2705 Legalizado' && !!obs[String(d.PEDIDO || '').trim()];
+    });
+    const obsHeader = document.getElementById('obs-col-header');
+    if (obsHeader) obsHeader.style.display = hasAnyObs ? '' : 'none';
+
+    tbody.innerHTML = filtered.map(function(d) {
+        const eg = getDUSEstadoGeneral(d.ESTATUS_FINAL);
+        const isLegalizado = eg.label === '\u2705 Legalizado';
+        const nota = isLegalizado ? '' : (obs[String(d.PEDIDO || '').trim()] || '');
+        // OBS-6: escHtml para fechas string (evita XSS si Excel envía texto en vez de fecha)
+        const fFac = (d.FECHA_FACTURA instanceof Date) ? d.FECHA_FACTURA.toLocaleDateString() : escHtml(d.FECHA_FACTURA || '-');
+        // C-05: escHtml() sanitiza datos de Excel (evita XSS si una celda contiene HTML)
+        // P-06: PEDIDO_RAW contiene la referencia completa legible; PEDIDO es el número limpio para llaves
+        const ePed  = escHtml(d.PEDIDO_RAW || d.PEDIDO);
+        const eCons = escHtml(d.CONSIGNATARIO);
+        const eResp = escHtml(d.RESPONSABLE);
+        const eDet  = escHtml(d.ESTADO_DUS_RAW || d.ESTATUS_FINAL);
+        const eNota = escHtml(nota);
+        const obsCell = hasAnyObs
+            ? '<td class="obs-cell" title="' + eNota + '">' + eNota + '</td>'
+            : '';
+        return '<tr class="' + (d._fromMemory ? 'memory-row' : '') + '">' +
+            '<td><span class="badge ' + eg.badgeClass + '">' + eg.label + '</span></td>' +
+            '<td title="' + eDet + '">' + eDet + '</td>' +
+            '<td title="' + ePed + '">' + ePed + '</td>' +
+            '<td title="' + eCons + '">' + eCons + '</td>' +
+            '<td title="' + eResp + '">' + eResp + '</td>' +
+            '<td style="white-space:nowrap">' + fFac + '</td>' +
+            obsCell +
+            '</tr>';
+    }).join('');
+
+    // Actualizar contador de búsqueda
+    const countEl = document.getElementById('search-count');
+    if (countEl) countEl.textContent = state.searchQuery ? `${filtered.length} resultado${filtered.length !== 1 ? 's' : ''}` : '';
+}
+
+/** Clasifica ESTADO GENERAL para el módulo DUS */
+function getDUSEstadoGeneral(estatusFinal) {
+    const s = String(estatusFinal || '');
+    if (s.includes('✅'))    return { label: '✅ Legalizado',  badgeClass: 'badge-green' };
+    if (s.includes('⚠️'))   return { label: '⚠️ Sin Zarpe', badgeClass: 'badge-yellow' };
+    if (s.includes('Anulado')) return { label: '❌ Anulado',    badgeClass: 'badge-critical' };
+    return                           { label: '❌ Pendiente',   badgeClass: 'badge-red' };
+}
+
+function updateChartForDUS(results) {
+    const ctx = document.getElementById('mainChart').getContext('2d');
+    if (state.chart) state.chart.destroy();
+    if (!results || results.length === 0) return;
+
+    const counts = {};
+    results.forEach(r => {
+        counts[r.ESTATUS_FINAL] = (counts[r.ESTATUS_FINAL] || 0) + 1;
+    });
+
+    const total = results.length;
+    const labels = Object.keys(counts).map(key => {
+        const pct = ((counts[key] / total) * 100).toFixed(1);
+        return `${key} (${pct}%)`;
+    });
+    const data = Object.values(counts);
+
+    state.chart = new Chart(ctx, {
+        type: 'pie',
+        data: {
+            labels: labels,
+            datasets: [{
+                data: data,
+                backgroundColor: labels.map((l, i) => {
+                    if (l.includes('✅')) return '#10b981'; // Nivel completado
+                    if (l.includes('IVV')) return '#f59e0b'; // Naranja para IVV
+                    const pendingColors = ['#ef4444', '#f87171', '#f43f5e', '#e11d48', '#fb7185', '#fda4af', '#9f1239'];
+                    return pendingColors[i % pendingColors.length];
+                }),
+                borderWidth: 0
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    position: 'right',
+                    labels: { color: 'rgba(255,255,255,0.7)', font: { size: 10 } }
+                }
+            }
+        }
+    });
+}
+
+function exportToExcel() {
+    const isAuditoria = state.currentModule === 'auditoria';
+    const selected = getSelectedValues(isAuditoria ? 'status-multi-select' : 'dus-multi-select');
+    let dataToExport = isAuditoria ? state.results : state.dusResults;
+
+    const containerId = isAuditoria ? 'status-multi-select' : 'dus-multi-select';
+    const totalOptions = document.querySelectorAll(`#${containerId} .ms-option`).length;
+
+    if (selected.length > 0 && selected.length < totalOptions) {
+        if (isAuditoria) {
+            // Para Auditoría: los filtros son etiquetas agrupadas (ej: '✅ Procesado')
+            // La comparación debe hacerse via getEstadoGeneral, igual que renderResults.
+            // Sin esto, '🚚 Procesado Terrestre' y '⚠️ Validado Manualmente' quedaban excluidos
+            // al exportar con el filtro '✅ Procesado' activo.
+            dataToExport = dataToExport.filter(r =>
+                selected.includes(getEstadoGeneral(r.ESTATUS_FINAL).label)
+            );
+        } else {
+            // Para DUS: los filtros son etiquetas de getDUSEstadoGeneral
+            dataToExport = dataToExport.filter(r =>
+                selected.some(s => r.ESTATUS_FINAL === s || r.ESTATUS_FINAL.includes(s))
+            );
+        }
+    }
+
+    // Aplicar filtro de grupo activo
+    const gFilter = getGrupoAnalysts();
+    if (gFilter) {
+        dataToExport = dataToExport.filter(r => gFilter.has(String(r.RESPONSABLE || '').toUpperCase().trim()));
+    }
+
+    // Aplicar búsqueda activa (lo que ves = lo que descargas)
+    if (state.searchQuery) {
+        dataToExport = applySearch(dataToExport, state.searchQuery, !isAuditoria);
+    }
+
+    if (dataToExport.length === 0) {
+        alert("No hay datos para exportar con el filtro actual.");
+        return;
+    }
+
+    const wsData = isAuditoria
+        ? dataToExport.map(r => {
+            const eg = getEstadoGeneral(r.ESTATUS_FINAL);
+            return {
+                'ESTADO GENERAL':  eg.label,
+                'DETALLE':         r.ESTATUS_FINAL,
+                'DEMORA':          r.DEMORA,
+                'T. GESTIÓN':     r.T_GESTIÓN !== null ? r.T_GESTIÓN : '-',
+                'N° PEDIDO':      r.PEDIDO,
+                'SOLICITANTE':     r.CLIENTE,
+                'RESPONSABLE':     r.RESPONSABLE,
+                'FECHA FAC.': (r.FECHA_FACTURA instanceof Date && !isNaN(r.FECHA_FACTURA)) ? r.FECHA_FACTURA : '',
+                'FECHA BL':   (r.FECHA_BL instanceof Date && !isNaN(r.FECHA_BL)) ? r.FECHA_BL : '',
+                'MOTIVO':          r.MOTIVO
+              };
+          })
+        : dataToExport.map(r => {
+            const eg = getDUSEstadoGeneral(r.ESTATUS_FINAL);
+            const isLegalizado = eg.label === '✅ Legalizado';
+            const obsData = loadObs();
+            const nota = isLegalizado ? '' : (obsData[String(r.PEDIDO || '').trim()] || '');
+            return {
+                'ESTADO GENERAL': eg.label,
+                'DETALLE':        r.ESTADO_DUS_RAW || r.ESTATUS_FINAL,
+                'N° PEDIDO':      r.PEDIDO_RAW || r.PEDIDO,
+                'CONSIGNATARIO':  r.CONSIGNATARIO,
+                'RESPONSABLE':    r.RESPONSABLE,
+                'FECHA FACTURA':  (r.FECHA_FACTURA_DATE instanceof Date && !isNaN(r.FECHA_FACTURA_DATE)) ? r.FECHA_FACTURA_DATE : '',
+                'OBSERVACIONES':  nota
+            };
+        });
+
+    const ws = XLSX.utils.json_to_sheet(wsData, { cellDates: true });
+
+    // Aplicar formato de fecha DD-MM-YYYY a las columnas de fecha
+    // para que Excel las ordene correctamente
+    if (ws['!ref']) {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        const dateFormat = 'DD-MM-YYYY';
+        // Detectar columnas de fecha por encabezado
+        const dateCols = [];
+        for (let C = range.s.c; C <= range.e.c; C++) {
+            const hCell = ws[XLSX.utils.encode_cell({c: C, r: 0})];
+            if (hCell && /fecha/i.test(String(hCell.v))) dateCols.push(C);
+        }
+        for (let R = range.s.r + 1; R <= range.e.r; R++) {
+            dateCols.forEach(C => {
+                const ref = XLSX.utils.encode_cell({c: C, r: R});
+                if (ws[ref] && ws[ref].v instanceof Date) {
+                    ws[ref].t = 'd';
+                    ws[ref].z = dateFormat;
+                }
+            });
+        }
+    }
+
+    
+    // Aplicar estilos y colores con xlsx-js-style
+    if (ws['!ref']) {
+        const range = XLSX.utils.decode_range(ws['!ref']);
+        
+        // Colorear contenido (ESTATUS FINAL es la Columna A = 0)
+        for(let R = range.s.r + 1; R <= range.e.r; ++R) {
+            const cellRef = XLSX.utils.encode_cell({c: 0, r: R});
+            const cell = ws[cellRef];
+            if(!cell || !cell.v) continue;
+            
+            const val = String(cell.v);
+            let bgColor = "FFFFFF";
+            let fontColor = "000000";
+            
+            if (val.includes('✅') || val.includes('Validado')) {
+                bgColor = "10B981"; // Verde
+                fontColor = "FFFFFF";
+            } else if (val.includes('IVV')) {
+                bgColor = "F59E0B"; // Naranjo
+                fontColor = "FFFFFF";
+            } else if (val.includes('📦')) {
+                bgColor = "F59E0B"; // Amarillo/Naranjo
+                fontColor = "FFFFFF";
+            } else if (val.includes('Error')) {
+                bgColor = "9F1239"; // Crítico/Burdeo
+                fontColor = "FFFFFF";
+            } else if (val.includes('❌')) {
+                bgColor = "EF4444"; // Rojo
+                fontColor = "FFFFFF";
+            } else if (val.includes('🚚')) {
+                bgColor = "3B82F6"; // Azul
+                fontColor = "FFFFFF";
+            }
+            
+            cell.s = {
+                fill: { fgColor: { rgb: bgColor } },
+                font: { color: { rgb: fontColor }, bold: true }
+            };
+        }
+        
+        // Colorear la cabecera (Fila 0)
+        for(let C = range.s.c; C <= range.e.c; ++C) {
+            const headRef = XLSX.utils.encode_cell({c: C, r: 0});
+            if(ws[headRef]) {
+                ws[headRef].s = {
+                    fill: { fgColor: { rgb: "1E293B" } }, // Dark header
+                    font: { color: { rgb: "FFFFFF" }, bold: true }
+                };
+            }
+        }
+    }
+
+    const wb = XLSX.utils.book_new();
+    const sheetName = isAuditoria ? "Auditoría Comex" : "Legalización DUS";
+    const grupoSuffix  = state.activeGrupo ? `_${state.activeGrupo.charAt(0).toUpperCase() + state.activeGrupo.slice(1)}` : '';
+    const searchSuffix = state.searchQuery  ? `_busqueda_${state.searchQuery.trim().slice(0,15).replace(/\s+/g,'_')}` : '';
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+    XLSX.writeFile(wb, `${sheetName}${grupoSuffix}${searchSuffix}_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+
+function updateExportButtonText(selected) {
+    const isAuditoria = state.currentModule === 'auditoria';
+    const btnId = isAuditoria ? 'export-excel-btn' : 'export-excel-btn-dus';
+    const btn = document.getElementById(btnId);
+    if (!btn) return;
+
+    // Calcular cuántas filas realmente visibles hay (estado + grupo + búsqueda)
+    let visible = isAuditoria ? (state.results || []) : (state.dusResults || []);
+    const containerId = isAuditoria ? 'status-multi-select' : 'dus-multi-select';
+    const total = document.querySelectorAll(`#${containerId} .ms-option`).length;
+    if (selected.length > 0 && selected.length < total) {
+        if (isAuditoria) {
+            // Para Auditoría: misma lógica de getEstadoGeneral que exportToExcel y renderResults
+            visible = visible.filter(r => selected.includes(getEstadoGeneral(r.ESTATUS_FINAL).label));
+        } else {
+            visible = visible.filter(r => selected.some(s => r.ESTATUS_FINAL === s || r.ESTATUS_FINAL.includes(s)));
+        }
+    }
+    const gf = getGrupoAnalysts();
+    if (gf) visible = visible.filter(r => gf.has(String(r.RESPONSABLE || '').toUpperCase().trim()));
+    if (state.searchQuery) visible = applySearch(visible, state.searchQuery, !isAuditoria);
+
+    const count = visible.length;
+    const hasFilters = selected.length > 0 && selected.length < total || state.activeGrupo || state.searchQuery;
+    btn.innerHTML = hasFilters
+        ? `<i data-lucide="download"></i> Exportar (${count} resultado${count !== 1 ? 's' : ''})`
+        : `<i data-lucide="download"></i> Exportar (Todos)`;
+    if (window.lucide) lucide.createIcons();
+}
+
+function getSelectedValues(id) {
+    return Array.from(document.querySelectorAll(`#${id} input:checked`)).map(i => i.value);
+}
+
+// =============================================================
+// DIRECTORIO DE EQUIPO (localStorage)
+// Asocia código SAP ↔ nombre completo del analista
+// =============================================================
+
+const TEAM_KEY = 'accomex_team_directory';
+
+function loadTeamDirectory() {
+    try { return JSON.parse(localStorage.getItem(TEAM_KEY) || '{}'); }
+    catch { return {}; }
+}
+
+function saveTeamDirectory(dir) {
+    localStorage.setItem(TEAM_KEY, JSON.stringify(dir));
+}
+
+/** Pre-carga el listado de analistas conocidos (solo si el código no existe aún) */
+function seedTeamDirectory() {
+    const defaultTeam = {
+        'CZAMORANO':   'Cristina Zamorano',
+        'DPINCOL':     'Daphne Pincol',
+        'EMARTINEZG':  'Eugenia Martínez',
+        'ESILVAJ':     'Evelyn Silva',
+        'GCHACANO':    'Gina Chacano',
+        'JOSANCHEZM':  'Jonathan Sánchez',
+        'LCONEJEROSM': 'Libni Conejeros',
+        'MIFIGUEROA':  'Matías Figueroa',
+        'MNSOTO':      'Matías Soto',
+        'MRAMIREZ':    'Marcelo Ramírez',
+        'SMOHOR':      'Scandar Mohor',
+        'SNAGUIL':     'Soraya Naguil',
+        'VVENEGAS':    'Victor Venegas',
+        'XLEICHTLE':   'Ximena Leichtle',
+        'YVALERO':     'Andreina Valero'
+    };
+    const dir = loadTeamDirectory();
+    let changed = false;
+    Object.entries(dir).forEach(([code, entry]) => {
+        // Migrar formato antiguo: string -> { name, grupo }
+        if (typeof entry === 'string') {
+            dir[code] = { name: entry, grupo: null };
+            changed = true;
+        }
+    });
+    Object.entries(defaultTeam).forEach(([code, name]) => {
+        if (!dir[code]) { dir[code] = { name, grupo: null }; changed = true; }
+    });
+    if (changed) saveTeamDirectory(dir);
+}
+
+/** Devuelve el nombre completo del analista dado su código SAP, o el propio código si no existe */
+function resolveAnalystName(code) {
+    const dir = loadTeamDirectory();
+    const entry = dir[String(code).toUpperCase().trim()];
+    if (!entry) return code;
+    return typeof entry === 'string' ? entry : (entry.name || code);
+}
+
+/** Devuelve el grupo de un código SAP, o null si no tiene */
+function resolveAnalystGrupo(code) {
+    const dir = loadTeamDirectory();
+    const entry = dir[String(code).toUpperCase().trim()];
+    if (!entry || typeof entry === 'string') return null;
+    return entry.grupo || null;
+}
+
+/** Devuelve un Set con los códigos del grupo activo, o null si es 'Todos' */
+function getGrupoAnalysts() {
+    if (!state.activeGrupo) return null;
+    const dir = loadTeamDirectory();
+    const codes = new Set();
+    Object.entries(dir).forEach(([code, entry]) => {
+        const g = typeof entry === 'string' ? null : (entry.grupo || null);
+        if (g === state.activeGrupo) codes.add(code.toUpperCase().trim());
+    });
+    return codes;
+}
+
+/** Activa un grupo y re-renderiza todo */
+function setActiveGrupo(grupo) {
+    state.activeGrupo = grupo || null;
+    document.querySelectorAll('.group-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.grupo === (grupo || ''));
+    });
+    const infoEl = document.getElementById('group-filter-info');
+    if (infoEl) {
+        if (state.activeGrupo) {
+            const counts = getGrupoAnalysts()?.size || 0;
+            infoEl.textContent = `${counts} analista${counts !== 1 ? 's' : ''}`;
+        } else {
+            infoEl.textContent = '';
+        }
+    }
+    // Re-renderizar todo
+    renderResults(getSelectedValues('status-multi-select'));
+    renderDUS(getSelectedValues('dus-multi-select'));
+    updateStats();
+    refreshAnalystFilters();
+    refreshAnalystChart();
+}
+
+function openTeamModal() {
+    document.getElementById('team-modal-overlay').style.display = 'flex';
+    renderTeamList();
+    if (window.lucide) lucide.createIcons();
+}
+
+function closeTeamModal() {
+    document.getElementById('team-modal-overlay').style.display = 'none';
+}
+
+function renderTeamList() {
+    const dir = loadTeamDirectory();
+    const list = document.getElementById('team-list');
+    const countEl = document.getElementById('team-count');
+    const entries = Object.entries(dir);
+
+    if (countEl) countEl.textContent = `${entries.length} miembro(s) registrado(s)`;
+
+    if (entries.length === 0) {
+        list.innerHTML = `<div style="color:rgba(255,255,255,0.3); text-align:center; padding:24px; font-size:0.85rem;">
+            Sin miembros. Agrega el primero arriba.</div>`;
+        return;
+    }
+
+    const getGrupoBadge = (entry) => {
+        const g = typeof entry === 'string' ? null : (entry.grupo || null);
+        if (!g) return '<span class="grupo-badge sin-grupo">Sin grupo</span>';
+        return g === 'congelado'
+            ? '<span class="grupo-badge congelado">❄️ Congelado</span>'
+            : '<span class="grupo-badge fresco">🌿 Fresco</span>';
+    };
+    const getName = (entry) => typeof entry === 'string' ? entry : (entry.name || '');
+
+    list.innerHTML = entries
+        .sort((a, b) => {
+            const ga = typeof a[1] === 'string' ? '' : (a[1].grupo || '');
+            const gb = typeof b[1] === 'string' ? '' : (b[1].grupo || '');
+            return ga.localeCompare(gb) || a[0].localeCompare(b[0]);
+        })
+        .map(([code, entry]) => {
+            // C-05 extendido: sanitizar código SAP y nombre antes de inyectar en innerHTML
+            // Previene XSS y el caso de apostrofes en nombres (ej: "O'Brien") que rompen onclick
+            const safeCode = escHtml(code);
+            const safeName = escHtml(getName(entry));
+            // Para el onclick usamos el original escapado con apostrofe para JS string
+            // OBS-7: escapar backslash antes que apóstrofe para no romper el JS string
+            const jsCode   = code.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+            return `
+        <div class="team-member-row">
+            <div class="team-member-info">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <span class="team-member-code">${safeCode}</span>
+                    ${getGrupoBadge(entry)}
+                </div>
+                <span class="team-member-name">${safeName}</span>
+            </div>
+            <button class="team-member-delete" onclick="removeTeamMember('${jsCode}')" title="Eliminar">
+                <i data-lucide="trash-2"></i>
+            </button>
+        </div>
+    `;
+        }).join('');
+
+    if (window.lucide) lucide.createIcons();
+}
+
+function addTeamMember() {
+    const codeEl = document.getElementById('team-input-code');
+    const nameEl = document.getElementById('team-input-name');
+    const grupoEl = document.getElementById('team-input-grupo');
+    const code = String(codeEl.value || '').toUpperCase().trim();
+    const name = String(nameEl.value || '').trim();
+    const grupo = grupoEl ? (grupoEl.value || null) : null;
+
+    if (!code || !name) { alert('Completa ambos campos: Código SAP y Nombre.'); return; }
+
+    const dir = loadTeamDirectory();
+    dir[code] = { name, grupo };
+    saveTeamDirectory(dir);
+
+    codeEl.value = '';
+    nameEl.value = '';
+    if (grupoEl) grupoEl.value = '';
+    codeEl.focus();
+    renderTeamList();
+    // Refrescar filtros del gráfico
+    refreshAnalystFilters();
+    refreshAnalystChart();
+}
+
+function removeTeamMember(code) {
+    if (!confirm(`¿Eliminar a ${resolveAnalystName(code)} (${code}) del directorio?`)) return;
+    const dir = loadTeamDirectory();
+    delete dir[code];
+    saveTeamDirectory(dir);
+    renderTeamList();
+    refreshAnalystFilters();
+    refreshAnalystChart();
+}
+
+// =============================================================
+// GRÁFICO DE CARGA POR ANALISTA
+// Horizontal grouped bars: Asignados vs Procesados/Legalizados
+// Fuente: Memoria acumulada del módulo activo
+// =============================================================
+
+let analystChart = null;
+let selectedAnalysts = new Set(); // vacío = todos
+let noAnalystSelected = false;    // A-04: bandera explícita para "ninguno seleccionado"
+
+function initAnalystChart() {
+    const ctx = document.getElementById('analystChart')?.getContext('2d');
+    if (!ctx) return;
+
+    analystChart = new Chart(ctx, {
+        type: 'bar',
+        data: { labels: [], datasets: [] },
+        options: {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    labels: { color: 'rgba(255,255,255,0.7)', font: { size: 11 } }
+                },
+                tooltip: {
+                    callbacks: {
+                        label: ctx => ` ${ctx.dataset.label}: ${ctx.parsed.x} pedido(s)`
+                    }
+                }
+            },
+            scales: {
+                x: {
+                    ticks: { color: 'rgba(255,255,255,0.5)', font: { size: 10 } },
+                    grid: { color: 'rgba(255,255,255,0.06)' },
+                    beginAtZero: true,
+                    precision: 0
+                },
+                y: {
+                    ticks: { color: 'rgba(255,255,255,0.8)', font: { size: 11 } },
+                    grid: { display: false }
+                }
+            }
+        }
+    });
+
+    refreshAnalystFilters();
+    refreshAnalystChart();
+}
+
+/** Construye los datos del gráfico combinando memoria (procesados históricos) + sesión actual (pendientes) */
+function buildAnalystChartData(selectedMonth, analystFilter, statusFilter) {
+    const module = state.currentModule;
+
+    // --- FUENTE 1: Memoria (procesados/legalizados históricos) ---
+    const mem = loadMemory(module);
+    const memRecords = Object.values(mem);
+
+    // --- FUENTE 2: Sesión actual (pendientes del día) ---
+    const sessionData = (module === 'auditoria' ? state.results : state.dusResults) || [];
+
+    // Agrupar por analista
+    const grouped = {};
+
+    const ensureAnalyst = (code) => {
+        if (!grouped[code]) grouped[code] = { procesados: 0, pendientes: 0, sinZarpe: 0, pedidos: [] };
+    };
+
+    const matchesMonthFilter = (fechaStr) => {
+        if (!selectedMonth || selectedMonth === 'all') return true;
+        const fecha = fechaStr ? new Date(fechaStr) : null;
+        if (!fecha || isNaN(fecha)) return false;
+        const key = `${fecha.getFullYear()}-${String(fecha.getMonth()+1).padStart(2,'0')}`;
+        return key === selectedMonth;
+    };
+
+    // Procesados desde memoria
+    memRecords.forEach(r => {
+        if (!matchesMonthFilter(r.FECHA_FACTURA)) return;
+        const code = String(r.RESPONSABLE || 'N/D').toUpperCase().trim();
+        // A-04: respetar bandera noAnalystSelected (ninguno = no mostrar ninguno)
+        if (noAnalystSelected) return;
+        if (analystFilter.size > 0 && !analystFilter.has(code)) return;
+        ensureAnalyst(code);
+        grouped[code].procesados++;
+        grouped[code].pedidos.push({ ...r, _source: 'memoria', _category: 'procesado' });
+    });
+
+    // Pendientes/Sin Zarpe desde sesión actual
+    sessionData.forEach(r => {
+        if (!matchesMonthFilter(r.FECHA_FACTURA || (r.FECHA_FACTURA_DATE ? r.FECHA_FACTURA_DATE.toISOString() : null))) return;
+        const s = String(r.ESTATUS_FINAL || '');
+        const egLabel = module === 'dus'
+            ? getDUSEstadoGeneral(s).label
+            : getEstadoGeneral(s).label;
+        const isProcessed = egLabel.includes('✅');
+        const isSinZarpe  = egLabel.includes('⚠️') && module === 'dus';
+        const isPending   = !isProcessed && !isSinZarpe;
+        if (!isPending && !isSinZarpe) return;
+
+        const code = String(r.RESPONSABLE || 'N/D').toUpperCase().trim();
+        // A-04: respetar bandera noAnalystSelected
+        if (noAnalystSelected) return;
+        if (analystFilter.size > 0 && !analystFilter.has(code)) return;
+        ensureAnalyst(code);
+        if (isSinZarpe) {
+            grouped[code].sinZarpe++;
+            grouped[code].pedidos.push({ ...r, _source: 'sesión', _category: 'sin_zarpe' });
+        } else {
+            grouped[code].pendientes++;
+            grouped[code].pedidos.push({ ...r, _source: 'sesión', _category: 'pendiente' });
+        }
+    });
+
+    // Ordenar por total desc
+    const sorted = Object.entries(grouped)
+        .map(([code, v]) => ({ code, ...v, total: v.procesados + v.pendientes + v.sinZarpe }))
+        .sort((a, b) => b.total - a.total);
+
+    // Aplicar filtro de status
+    const showProcessed = !statusFilter || statusFilter.has('procesados');
+    const showPending   = !statusFilter || statusFilter.has('pendientes');
+    const showSinZarpe  = !statusFilter || statusFilter.has('sin_zarpe');
+
+    const labels       = sorted.map(e => resolveAnalystName(e.code));
+    const procesados   = sorted.map(e => showProcessed ? e.procesados : 0);
+    const pendientes   = sorted.map(e => showPending   ? e.pendientes : 0);
+    const sinZarpe     = sorted.map(e => showSinZarpe  ? e.sinZarpe   : 0);
+    const allPedidos   = sorted.flatMap(e => e.pedidos); // para export
+
+    return { labels, procesados, pendientes, sinZarpe, allPedidos, sorted, hasData: sorted.length > 0 };
+}
+
+/** Rellena el select de mes con los meses disponibles en la memoria */
+function refreshAnalystFilters() {
+    const module = state.currentModule;
+    const mem = loadMemory(module);
+    const records = Object.values(mem);
+
+    // Meses disponibles
+    const monthSet = new Set();
+    records.forEach(r => {
+        const fecha = r.FECHA_FACTURA ? new Date(r.FECHA_FACTURA) : null;
+        if (fecha && !isNaN(fecha)) {
+            monthSet.add(`${fecha.getFullYear()}-${String(fecha.getMonth() + 1).padStart(2,'0')}`);
+        }
+    });
+
+    const monthSel = document.getElementById('analyst-month-filter');
+    if (monthSel) {
+        const current = monthSel.value;
+        const months = Array.from(monthSet).sort().reverse();
+        monthSel.innerHTML = `<option value="all">Todos los meses</option>` +
+            months.map(m => {
+                const [y, mo] = m.split('-');
+                const label = new Date(+y, +mo - 1).toLocaleString('es-CL', { month: 'long', year: 'numeric' });
+                const cap = label.charAt(0).toUpperCase() + label.slice(1);
+                return `<option value="${m}" ${m === current ? 'selected' : ''}>${cap}</option>`;
+            }).join('');
+    }
+
+    // Multi-select analistas: combina from memory + directorio (filtrado por grupo activo)
+    const analystSet = new Set(records.map(r => String(r.RESPONSABLE || '').toUpperCase().trim()).filter(Boolean));
+    const dir = loadTeamDirectory();
+    Object.keys(dir).forEach(k => analystSet.add(k.toUpperCase().trim()));
+
+    // Pre-filtrar por grupo activo
+    const gFilter = getGrupoAnalysts();
+    const filteredAnalysts = gFilter
+        ? Array.from(analystSet).filter(code => gFilter.has(code))
+        : Array.from(analystSet);
+
+    const optionsEl = document.getElementById('analyst-ms-options');
+    if (optionsEl) {
+        // Encabezado: Seleccionar todo / Desmarcar todo
+        const selectAllHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:center; padding:6px 8px 10px; border-bottom:1px solid rgba(255,255,255,0.07); margin-bottom:4px; min-width:0;">
+                <button onclick="analystSelectAll(true)" style="background:none;border:none;color:rgba(99,102,241,0.9);font-size:0.78rem;cursor:pointer;padding:2px 4px;white-space:nowrap;flex-shrink:0;">✔ Todos</button>
+                <button onclick="analystSelectAll(false)" style="background:none;border:none;color:rgba(248,113,113,0.8);font-size:0.78rem;cursor:pointer;padding:2px 4px;white-space:nowrap;flex-shrink:0;">✕ Ninguno</button>
+            </div>`;
+
+        optionsEl.innerHTML = selectAllHTML + filteredAnalysts.sort().map(code => `
+            <label class="ms-option">
+                <input type="checkbox" value="${escHtml(code)}" ${selectedAnalysts.size === 0 || selectedAnalysts.has(code) ? 'checked' : ''}>
+                <span>${escHtml(resolveAnalystName(code))} <small style="opacity:0.5;">(${escHtml(code)})</small></span>
+            </label>
+        `).join('');
+
+        // Wire checkboxes
+        optionsEl.querySelectorAll('input').forEach(cb => {
+            cb.addEventListener('change', () => {
+                const checked = Array.from(optionsEl.querySelectorAll('input:checked')).map(i => i.value);
+                const all = Array.from(optionsEl.querySelectorAll('input')).length;
+                // A-04: resetear bandera noAnalystSelected cuando el usuario selecciona individualmente
+                noAnalystSelected = false;
+                selectedAnalysts = checked.length === all ? new Set() : new Set(checked);
+                updateAnalystTriggerLabel(checked, all);
+                refreshAnalystChart();
+            });
+        });
+    }
+}
+
+/** Actualiza el texto de la píldora del multi-select con texto inteligente + animación */
+function updateAnalystTriggerLabel(checked, total) {
+    const labelEl = document.getElementById('analyst-ms-label');
+    if (!labelEl) return;
+
+    let text;
+    if (!checked || checked.length === 0 || checked.length === total) {
+        text = '👤 Todos';
+    } else if (checked.length === 1) {
+        text = `👤 ${resolveAnalystName(checked[0])}`;
+    } else if (checked.length === 2) {
+        text = `👤 ${checked.map(c => resolveAnalystName(c)).join(' · ')}`;
+    } else {
+        text = `👤 ${checked.length} analistas`;
+    }
+
+    // Animación de pulso suave al cambiar
+    labelEl.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
+    labelEl.style.opacity = '0';
+    labelEl.style.transform = 'translateY(-4px)';
+    requestAnimationFrame(() => {
+        labelEl.textContent = text;
+        labelEl.style.opacity = '1';
+        labelEl.style.transform = 'translateY(0)';
+    });
+}
+
+function setupAnalystMultiSelect() {
+    const trigger = document.getElementById('analyst-ms-trigger');
+    const container = document.getElementById('analyst-select-container');
+    if (!trigger || !container) return;
+
+    trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        container.classList.toggle('open');
+    });
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('#analyst-select-container'))
+            container.classList.remove('open');
+    });
+}
+
+function refreshAnalystChart() {
+    if (!analystChart) return;
+    const selectedMonth = document.getElementById('analyst-month-filter')?.value || 'all';
+
+    // Filtro de status (qué datasets mostrar)
+    let statusFilter = null; // null = mostrar todos
+    const sfChecks = document.querySelectorAll('.analyst-status-filter:checked');
+    if (sfChecks.length > 0 && sfChecks.length < document.querySelectorAll('.analyst-status-filter').length) {
+        statusFilter = new Set(Array.from(sfChecks).map(c => c.value));
+    }
+
+    const { labels, procesados, pendientes, sinZarpe, hasData } =
+        buildAnalystChartData(selectedMonth, selectedAnalysts, statusFilter);
+
+    document.getElementById('analyst-empty').style.display = hasData ? 'none' : 'flex';
+
+    const module = state.currentModule;
+    const isDUS = module === 'dus';
+
+    analystChart.data.labels = labels;
+    analystChart.data.datasets = [
+        {
+            label: isDUS ? 'Legalizados' : 'Procesados',
+            data: procesados,
+            backgroundColor: 'rgba(52,211,153,0.6)',
+            borderColor: 'rgba(52,211,153,1)',
+            borderWidth: 1,
+            borderRadius: 4
+        },
+        {
+            label: isDUS ? 'Pendiente Legalización' : 'Pendientes a Facturar',
+            data: pendientes,
+            backgroundColor: 'rgba(248,113,113,0.6)',
+            borderColor: 'rgba(248,113,113,1)',
+            borderWidth: 1,
+        },
+        ...(isDUS ? [{
+            label: 'Sin Zarpe',
+            data: sinZarpe,
+            backgroundColor: 'rgba(251,146,60,0.6)',
+            borderColor: 'rgba(251,146,60,1)',
+            borderWidth: 1,
+            borderRadius: 4
+        }] : [])
+    ];
+
+    const h = Math.max(200, labels.length * 65);
+    const canvas = document.getElementById('analystChart');
+    if (canvas) canvas.parentElement.style.maxHeight = h + 'px';
+
+    analystChart.update();
+}
+
+/** Exporta el gráfico + tablas en UN SOLO Excel usando ExcelJS (imagen embebida) */
+async function exportAnalystReport() {
+    if (typeof ExcelJS === 'undefined') {
+        alert('La librería ExcelJS aún se está cargando. Intenta en unos segundos.');
+        return;
+    }
+
+    const selectedMonth = document.getElementById('analyst-month-filter')?.value || 'all';
+    let statusFilter = null;
+    const sfChecks = document.querySelectorAll('.analyst-status-filter:checked');
+    if (sfChecks.length > 0 && sfChecks.length < document.querySelectorAll('.analyst-status-filter').length) {
+        statusFilter = new Set(Array.from(sfChecks).map(c => c.value));
+    }
+
+    // Aplicar filtro de grupo al reporte de analistas
+    const gFilter = getGrupoAnalysts();
+    let analystFilterForExport = selectedAnalysts;
+    if (gFilter) {
+        // Si hay grupo activo, intersectar con la selección manual de analistas
+        // Si selectedAnalysts está vacío (= todos), usamos directamente el grupo como filtro
+        analystFilterForExport = selectedAnalysts.size === 0
+            ? gFilter
+            : new Set([...selectedAnalysts].filter(c => gFilter.has(c)));
+    }
+
+    const { sorted, allPedidos } = buildAnalystChartData(selectedMonth, analystFilterForExport, statusFilter);
+    const module = state.currentModule;
+    const isDUS = module === 'dus';
+    const fecha = new Date().toISOString().slice(0, 10);
+    const grupoSuffix = state.activeGrupo ? `_${state.activeGrupo.charAt(0).toUpperCase() + state.activeGrupo.slice(1)}` : '';
+    const titulo = (isDUS ? 'Legalización DUS' : 'Auditoría Comex') + (state.activeGrupo ? ` — ${state.activeGrupo === 'congelado' ? '❄️ Congelado' : '🌿 Fresco'}` : '');
+
+    // ── 1. Capturar imagen del gráfico ──────────────────────────
+    const canvas = document.getElementById('analystChart');
+    let imgBase64 = null;
+    let chartW = 620, chartH = 300;
+    if (canvas) {
+        chartW = canvas.width;
+        chartH = canvas.height;
+        // Canvas temporal con fondo oscuro para que las etiquetas blancas sean visibles en Excel
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width  = chartW;
+        exportCanvas.height = chartH;
+        const ectx = exportCanvas.getContext('2d');
+        ectx.fillStyle = '#1e293b';
+        ectx.fillRect(0, 0, chartW, chartH);
+        ectx.drawImage(canvas, 0, 0);
+        imgBase64 = exportCanvas.toDataURL('image/png')
+            .replace(/^data:image\/png;base64,/, '');
+    }
+
+    // ── 2. Crear workbook ExcelJS ────────────────────────────────
+    const wb = new ExcelJS.Workbook();
+    wb.creator = 'AQUASHIELD · ExportDesk';
+    wb.created = new Date();
+
+    // Estilo de cabecera (oscuro con texto blanco)
+    const headerFill  = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    const headerFont  = { color: { argb: 'FFFFFFFF' }, bold: true, name: 'Calibri', size: 11 };
+    const dataFont    = { name: 'Calibri', size: 10, color: { argb: 'FF1E293B' } };
+    const borderStyle = { style: 'thin', color: { argb: 'FFCBD5E1' } };
+    const allBorders  = { top: borderStyle, left: borderStyle, bottom: borderStyle, right: borderStyle };
+
+    const applyHeaderRow = (row) => {
+        row.eachCell(cell => {
+            cell.fill = headerFill;
+            cell.font = headerFont;
+            cell.border = allBorders;
+            cell.alignment = { vertical: 'middle', horizontal: 'center' };
+        });
+        row.height = 22;
+    };
+
+    // Filas de datos: fondo blanco / gris muy claro alternado, texto oscuro
+    const applyDataRow = (row, isEven) => {
+        row.eachCell(cell => {
+            cell.font = dataFont;
+            cell.border = allBorders;
+            cell.fill = isEven
+                ? { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } }   // blanco
+                : { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };  // gris muy claro
+            cell.alignment = { vertical: 'middle' };
+        });
+        row.height = 18;
+    };
+
+
+    // ── HOJA 1: Gráfico + Resumen ────────────────────────────────
+    const wsGrafico = wb.addWorksheet('Gráfico');
+    wsGrafico.views = [{ showGridLines: false }];
+
+    // Título
+    wsGrafico.mergeCells('A1:G1');
+    const titleCell = wsGrafico.getCell('A1');
+    titleCell.value = `Carga por Analista — ${titulo} — ${fecha}`;
+    titleCell.font = { bold: true, size: 13, color: { argb: 'FFFFFFFF' }, name: 'Calibri' };
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0F172A' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+    wsGrafico.getRow(1).height = 30;
+
+    // Imagen del gráfico
+    const chartRowStart = 2;
+    // 1 Excel point (height=18) ≈ 24px at 96dpi (18pt * 1.333px/pt)
+    const PX_PER_ROW = 24;
+    const chartRows = Math.ceil(chartH / PX_PER_ROW) + 5; // +5 filas buffer
+    if (imgBase64) {
+        const imageId = wb.addImage({ base64: imgBase64, extension: 'png' });
+        wsGrafico.addImage(imageId, {
+            tl: { col: 0, row: chartRowStart - 1 },
+            ext: { width: Math.min(chartW, 620), height: chartH }
+        });
+        // Fijar altura de cada fila reservada
+        for (let i = chartRowStart; i <= chartRowStart + chartRows; i++) {
+            wsGrafico.getRow(i).height = 18;
+        }
+    }
+
+    // Tabla resumen debajo de la imagen
+    const tableStartRow = chartRowStart + chartRows + 2;
+    const sumHeaders = ['Analista', 'Código SAP', 'Procesados', 'Pendientes',
+        ...(isDUS ? ['Sin Zarpe'] : []), 'Total'];
+    const sumRow = wsGrafico.getRow(tableStartRow);
+    sumHeaders.forEach((h, i) => { sumRow.getCell(i + 1).value = h; });
+    applyHeaderRow(sumRow);
+
+    sorted.forEach((e, idx) => {
+        const row = wsGrafico.getRow(tableStartRow + 1 + idx);
+        const vals = [resolveAnalystName(e.code), e.code, e.procesados, e.pendientes,
+            ...(isDUS ? [e.sinZarpe] : []), e.total];
+        vals.forEach((v, i) => { row.getCell(i + 1).value = v; });
+        applyDataRow(row, idx % 2 === 0);
+    });
+
+    // Ancho columnas
+    wsGrafico.columns = sumHeaders.map((_, i) => ({ width: i === 0 ? 28 : 14 }));
+
+    // ── HOJA 2: Pedidos (detalle) ────────────────────────────────
+    const wsPedidos = wb.addWorksheet('Pedidos');
+    wsPedidos.views = [{ showGridLines: false }];
+
+    const pedHeaders = isDUS
+        ? ['Analista', 'Código SAP', 'Categoría', 'Estatus', 'N° Pedido', 'Consignatario', 'Factura SAP', 'Fecha Factura']
+        : ['Analista', 'Código SAP', 'Categoría', 'Estado General', 'Detalle', 'N° Pedido', 'Cliente', 'Fecha Fac.'];
+
+    const headRow = wsPedidos.getRow(1);
+    pedHeaders.forEach((h, i) => { headRow.getCell(i + 1).value = h; });
+    applyHeaderRow(headRow);
+
+    allPedidos.forEach((p, idx) => {
+        const code = String(p.RESPONSABLE || '').toUpperCase();
+        const catLabel = p._category === 'procesado'
+            ? '✅ Procesado'
+            : p._category === 'sin_zarpe' ? '⚠️ Sin Zarpe' : '❌ Pendiente';
+
+        const vals = isDUS
+            ? [resolveAnalystName(code), code, catLabel, p.ESTATUS_FINAL, p.PEDIDO,
+               p.CONSIGNATARIO || '-', p.FACTURA_SAP || '-',
+               p.FECHA_FACTURA_DATE instanceof Date ? p.FECHA_FACTURA_DATE : '']
+            : [resolveAnalystName(code), code, catLabel,
+               getEstadoGeneral(p.ESTATUS_FINAL).label, p.ESTATUS_FINAL,
+               p.PEDIDO, p.CLIENTE || '-',
+               p.FECHA_FACTURA instanceof Date ? p.FECHA_FACTURA : ''];
+
+        const row = wsPedidos.getRow(idx + 2);
+        vals.forEach((v, i) => { row.getCell(i + 1).value = v; });
+        applyDataRow(row, idx % 2 === 0);
+
+        // Formato fecha para la última columna
+        const dateCell = row.getCell(vals.length);
+        if (dateCell.value instanceof Date) dateCell.numFmt = 'DD-MM-YYYY';
+    });
+
+    wsPedidos.columns = pedHeaders.map((_, i) => ({
+        width: [28, 14, 16, 18, 22, 16, 26, 16][i] || 14
+    }));
+
+    // ── 3. Descargar ─────────────────────────────────────────────
+    const buffer = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `Reporte_Analistas_${isDUS ? 'DUS' : 'Auditoria'}_${new Date().toISOString().slice(0,10)}.xlsx`;
+    link.click();
+    URL.revokeObjectURL(url);
+}
+
+/** Selecciona o desmarca todos los analistas del multi-select */
+function analystSelectAll(selectAll) {
+    const optionsEl = document.getElementById('analyst-ms-options');
+    if (!optionsEl) return;
+
+    const checkboxes = Array.from(optionsEl.querySelectorAll('input[type="checkbox"]'));
+    checkboxes.forEach(cb => { cb.checked = selectAll; });
+
+    if (selectAll) {
+        selectedAnalysts = new Set(); // vacío = todos
+        noAnalystSelected = false;    // A-04: limpiar bandera
+        updateAnalystTriggerLabel(checkboxes.map(c => c.value), checkboxes.length);
+    } else {
+        // A-04: usar bandera booleana explícita en vez del sentinel '__ninguno__'
+        // que podría colisionar con un código SAP real en el futuro
+        selectedAnalysts = new Set();
+        noAnalystSelected = true;
+        const labelEl = document.getElementById('analyst-ms-label');
+        if (labelEl) {
+            labelEl.style.transition = 'opacity 0.15s ease, transform 0.15s ease';
+            labelEl.style.opacity = '0';
+            labelEl.style.transform = 'translateY(-4px)';
+            requestAnimationFrame(() => {
+                labelEl.textContent = '👤 Ninguno';
+                labelEl.style.opacity = '1';
+                labelEl.style.transform = 'translateY(0)';
+            });
+        }
+    }
+    refreshAnalystChart();
+}
+
+// =============================================================
+// MÓDULO: DUS OBSERVACIONES
+// =============================================================
+
+const OBS_KEY = 'dus_observaciones';
+
+function loadObs() {
+    try { return JSON.parse(localStorage.getItem(OBS_KEY) || '{}'); }
+    catch { return {}; }
+}
+function saveObs(obs) {
+    // A-06 aplicado también a observaciones: capturar QuotaExceededError
+    try {
+        localStorage.setItem(OBS_KEY, JSON.stringify(obs));
+    } catch (e) {
+        if (e.name === 'QuotaExceededError' || e.code === 22) {
+            alert('⚠️ La memoria de observaciones está llena. Exporta y limpia el historial.');
+        }
+    }
+}
+
+function mergeObs(dest, pedido, nota) {
+    const key = String(pedido || '').trim();
+    const text = String(nota || '').trim();
+    if (!key || !text) return;
+    if (!dest[key]) { dest[key] = text; }
+    else if (!dest[key].split(' | ').includes(text)) { dest[key] = dest[key] + ' | ' + text; }
+}
+
+async function parseObsExcel(file) {
+    const data = await file.arrayBuffer();
+    const wb = XLSX.read(data, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+    if (rows.length < 2) { alert('El archivo no contiene datos.'); return; }
+    const headers = rows[0].map(h => String(h || '').toLowerCase().trim());
+    const pedidoIdx = headers.findIndex(h => h.includes('pedido'));
+    const obsIdx = headers.findIndex(h => h.includes('observ'));
+    if (pedidoIdx === -1 || obsIdx === -1) {
+        alert('No se encontraron columnas "N Pedido" y "Observaciones".\nRevisa que el Excel tenga esas columnas.');
+        return;
+    }
+    const obs = loadObs();
+    let added = 0, updated = 0, skipped = 0;
+    for (let i = 1; i < rows.length; i++) {
+        const row = rows[i];
+        const pedido = String(row[pedidoIdx] || '').trim();
+        const nota = String(row[obsIdx] || '').trim();
+        if (!pedido || !nota) { skipped++; continue; }
+        const before = obs[pedido];
+        mergeObs(obs, pedido, nota);
+        if (!before) added++;
+        else if (obs[pedido] !== before) updated++;
+        else skipped++;
+    }
+    saveObs(obs);
+    renderObsList();
+    renderDUS(getSelectedValues('dus-multi-select'));
+    alert('Observaciones cargadas:\n' + added + ' nuevas  -  ' + updated + ' actualizadas  -  ' + skipped + ' omitidas');
+}
+
+function addObsManual() {
+    const pedidoEl = document.getElementById('obs-input-pedido');
+    const notaEl = document.getElementById('obs-input-nota');
+    const pedido = String(pedidoEl?.value || '').trim();
+    const nota = String(notaEl?.value || '').trim();
+    if (!pedido || !nota) { alert('Completa el N de Pedido y la observacion.'); return; }
+    const obs = loadObs();
+    mergeObs(obs, pedido, nota);
+    saveObs(obs);
+    pedidoEl.value = ''; notaEl.value = ''; pedidoEl.focus();
+    renderObsList();
+    renderDUS(getSelectedValues('dus-multi-select'));
+}
+
+function deleteObs(pedido) {
+    const obs = loadObs();
+    delete obs[String(pedido).trim()];
+    saveObs(obs);
+    renderObsList();
+    renderDUS(getSelectedValues('dus-multi-select'));
+}
+
+function renderObsList() {
+    const obs = loadObs();
+    const container = document.getElementById('obs-list-container');
+    const listEl = document.getElementById('obs-list');
+    const badge = document.getElementById('obs-count-badge');
+    const entries = Object.entries(obs);
+    if (badge) badge.textContent = entries.length > 0 ? String(entries.length) : '';
+    if (!listEl) return;
+    if (entries.length === 0) {
+        if (container) container.style.display = 'none';
+        listEl.innerHTML = '';
+        return;
+    }
+    if (container) container.style.display = 'block';
+    listEl.innerHTML = '<table class="obs-table"><thead><tr><th>Pedido</th><th>Observacion</th><th></th></tr></thead><tbody>' +
+        entries.map(function(e) {
+            var p = escHtml(e[0]),   // C-05: sanitizar pedido
+                n = escHtml(e[1]);  // C-05: sanitizar nota de observación
+            return '<tr><td class="obs-pedido-cell">' + p + '</td>' +
+                   '<td class="obs-nota-cell" title="' + n + '">' + n + '</td>' +
+                   // OBS-7: escapar backslash + apóstrofe para onclick seguro
+                   '<td><button class="obs-delete-btn" onclick="deleteObs(\'' + e[0].replace(/\\/g,'\\\\').replace(/'/g,"\\'") + '\')" title="Eliminar"><i data-lucide="x"></i></button></td></tr>';
+        }).join('') +
+        '</tbody></table>';
+    if (window.lucide) lucide.createIcons();
+}
+
+function setupObsWidget() {
+    const dropzone = document.getElementById('obs-dropzone');
+    const fileInput = document.getElementById('obs-file-input');
+    if (!dropzone || !fileInput) return;
+    dropzone.addEventListener('click', function() { fileInput.click(); });
+    fileInput.addEventListener('change', function() {
+        if (fileInput.files[0]) parseObsExcel(fileInput.files[0]);
+        fileInput.value = '';
+    });
+    dropzone.addEventListener('dragover', function(e) { e.preventDefault(); dropzone.classList.add('drag-over'); });
+    dropzone.addEventListener('dragleave', function() { dropzone.classList.remove('drag-over'); });
+    dropzone.addEventListener('drop', function(e) {
+        e.preventDefault();
+        dropzone.classList.remove('drag-over');
+        var file = e.dataTransfer.files[0];
+        if (file && /\.(xlsx|xls)$/i.test(file.name)) parseObsExcel(file);
+        else alert('Por favor arrastra un archivo Excel (.xlsx / .xls)');
+    });
+    var notaInput = document.getElementById('obs-input-nota');
+    if (notaInput) notaInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') addObsManual(); });
+    renderObsList();
+}

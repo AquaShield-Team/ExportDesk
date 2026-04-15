@@ -1166,3 +1166,53 @@ th.sortable.sort-desc { color: var(--blue); }
     width: 100px; transition: border-color 0.2s;
 }
 .glass-input.obs-input:focus { border-color: rgba(251,146,60,0.5); }
+
+/* =============================================================
+   PLOTLY.JS INTERACTIVE CHARTS
+   ============================================================= */
+
+.plotly-container {
+    width: 100%;
+    min-height: 260px;
+    position: relative;
+}
+
+.plotly-container > div {
+    width: 100% !important;
+}
+
+/* Ensure Plotly modebar blends with glass theme */
+.plotly-container .modebar {
+    opacity: 0.3;
+    transition: opacity 0.2s;
+}
+.plotly-container:hover .modebar {
+    opacity: 0.7;
+}
+
+/* Widget badge (Histórico, Sesión Actual, etc.) */
+.widget-badge {
+    font-size: 0.7rem;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: rgba(99, 102, 241, 0.15);
+    color: rgba(129, 140, 248, 0.9);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+/* Animate new chart widgets on load */
+#trend-chart-widget,
+#heatmap-chart-widget,
+#treemap-chart-widget {
+    animation: slideUp 0.4s ease-out backwards;
+}
+#trend-chart-widget   { animation-delay: 0.15s; }
+#heatmap-chart-widget { animation-delay: 0.25s; }
+#treemap-chart-widget { animation-delay: 0.35s; }
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+}

@@ -244,6 +244,9 @@ function switchTab(module) {
     // Update Chart for Current Module
     if (isAuditoria) {
         updateChart(state.results);
+        // Mostrar widgets exclusivos de Auditoría
+        const treemapW = document.getElementById('treemap-chart-widget');
+        if (treemapW) treemapW.style.display = '';
     } else {
         updateChartForDUS(state.dusResults);
     }
@@ -740,6 +743,8 @@ function runAudit() {
             } else {
                 updateChartForDUS(state.dusResults);
             }
+            // Plotly: actualizar tendencia y heatmap con los datos frescos
+            updateTrendChart();
             if(exportBtn) exportBtn.disabled = false;
             if(exportBtnDus) exportBtnDus.disabled = false;
             // Auto-guardar en memoria los registros procesados/legalizados
@@ -1329,77 +1334,411 @@ function updateStats() {
 }
 
 
+// =============================================================
+// PLOTLY.JS — GRÁFICOS INTERACTIVOS
+// =============================================================
+
+/** Layout base Plotly: fondo transparente, texto claro, sin ejes blancos */
+const PLOTLY_DARK_LAYOUT = {
+    paper_bgcolor: 'rgba(0,0,0,0)',
+    plot_bgcolor: 'rgba(0,0,0,0)',
+    font: { family: 'Inter, sans-serif', color: 'rgba(255,255,255,0.75)', size: 12 },
+    margin: { t: 30, r: 20, b: 40, l: 50 }
+};
+const PLOTLY_CONFIG = {
+    responsive: true,
+    displaylogo: false,
+    modeBarButtonsToRemove: ['lasso2d', 'select2d', 'autoScale2d']
+};
+
 function initChart() {
-    const ctx = document.getElementById('mainChart').getContext('2d');
-    state.chart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: ['Procesados', 'Terrestres', 'Pendientes', 'Errores'],
-            datasets: [{
-                data: [0, 0, 0, 0],
-                backgroundColor: ['#4ade80', '#60a5fa', '#fb923c', '#f87171'],
-                borderWidth: 0
-            }]
-        },
-        options: {
-            cutout: '70%',
-            plugins: { legend: { position: 'bottom', labels: { color: '#a0a0a0' } } },
-            maintainAspectRatio: false
-        }
-    });
+    // Plotly se inicializa en el primer render — no necesita canvas
 }
 
+/** Gauge semicircular de cumplimiento (reemplaza doughnut) */
 function updateChart(results) {
-    const ctx = document.getElementById('mainChart').getContext('2d');
-    if (state.chart) state.chart.destroy();
-    // P-08: early-return si no hay resultados (igual que updateChartForDUS)
-    if (!results || results.length === 0) return;
+    const el = document.getElementById('gaugeChart');
+    if (!el) return;
+    el.style.display = '';
+    const wf = document.getElementById('waterfallChart');
+    if (wf) wf.style.display = 'none';
 
-    const counts = {
-        'Procesados': results.filter(r => r.ESTATUS_FINAL.includes('✅')).length,
-        'Pendientes': results.filter(r => r.ESTATUS_FINAL.includes('❌')).length,
-        'Pend. Factura': results.filter(r => r.ESTATUS_FINAL.includes('📦')).length,
-        'Terrestres': results.filter(r => r.ESTATUS_FINAL.includes('🚚')).length,
-        'Verificados': results.filter(r => r.ESTATUS_FINAL.includes('Validado')).length,
-        'Errores': results.filter(r => r.ESTATUS_FINAL.includes('Error')).length
-    };
+    if (!results || results.length === 0) {
+        Plotly.purge(el);
+        return;
+    }
 
     const total = results.length;
-    const labels = Object.keys(counts).map(key => {
-        const pct = ((counts[key] / total) * 100).toFixed(1);
-        return `${key} (${pct}%)`;
-    });
-    const data = Object.values(counts);
+    const proc = results.filter(r => r.ESTATUS_FINAL.includes('✅') || r.ESTATUS_FINAL.includes('🚚')).length;
+    const pct = Math.round((proc / total) * 100);
 
-    state.chart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: [
-                    '#10b981', // Verde Procesado
-                    '#ef4444', // Rojo Pendiente
-                    '#f59e0b', // Amarillo Factura
-                    '#3b82f6', // Azul Terrestre
-                    '#059669', // Verde Esmeralda (Manual)
-                    '#f97316'  // Naranja Error
-                ],
-                borderWidth: 0
-            }]
+    const data = [{
+        type: 'indicator',
+        mode: 'gauge+number+delta',
+        value: pct,
+        number: { suffix: '%', font: { size: 48, color: '#e2e8f0' } },
+        gauge: {
+            axis: { range: [0, 100], tickwidth: 1, tickcolor: 'rgba(255,255,255,0.2)', dtick: 25 },
+            bar: { color: pct >= 80 ? '#10b981' : pct >= 50 ? '#f59e0b' : '#ef4444', thickness: 0.3 },
+            bgcolor: 'rgba(255,255,255,0.05)',
+            borderwidth: 0,
+            steps: [
+                { range: [0, 40], color: 'rgba(239,68,68,0.12)' },
+                { range: [40, 70], color: 'rgba(245,158,11,0.12)' },
+                { range: [70, 100], color: 'rgba(16,185,129,0.12)' }
+            ],
+            threshold: {
+                line: { color: '#818cf8', width: 3 },
+                thickness: 0.8,
+                value: pct
+            }
+        }
+    }];
+
+    const layout = {
+        ...PLOTLY_DARK_LAYOUT,
+        height: 280,
+        margin: { t: 20, r: 30, b: 10, l: 30 },
+        annotations: [{
+            text: `<b>${proc}</b> de <b>${total}</b> procesados`,
+            x: 0.5, y: -0.05,
+            showarrow: false,
+            font: { size: 13, color: 'rgba(255,255,255,0.5)' }
+        }]
+    };
+
+    Plotly.react(el, data, layout, PLOTLY_CONFIG);
+    updateTrendChart();
+    updateHeatmapChart(results);
+    updateTreemapChart(results);
+}
+
+/** Waterfall DUS — pipeline visual del flujo de legalización */
+function updateChartForDUS(results) {
+    const wf = document.getElementById('waterfallChart');
+    const gauge = document.getElementById('gaugeChart');
+    if (!wf) return;
+    wf.style.display = '';
+    if (gauge) gauge.style.display = 'none';
+
+    if (!results || results.length === 0) {
+        Plotly.purge(wf);
+        return;
+    }
+
+    // Agrupar por estado
+    const counts = {};
+    results.forEach(r => {
+        const st = r.ESTATUS_FINAL || 'Desconocido';
+        counts[st] = (counts[st] || 0) + 1;
+    });
+
+    // Ordenar: legalizados primero, luego por cantidad descendente
+    const sorted = Object.entries(counts).sort((a, b) => {
+        if (a[0].includes('✅')) return -1;
+        if (b[0].includes('✅')) return 1;
+        return b[1] - a[1];
+    });
+
+    const labels = sorted.map(([k]) => k.length > 25 ? k.slice(0, 22) + '…' : k);
+    const values = sorted.map(([, v]) => v);
+    const colors = sorted.map(([k]) => {
+        if (k.includes('✅')) return '#10b981';
+        if (k.includes('IVV') || k.includes('Sin Zarpe')) return '#f59e0b';
+        if (k.includes('Anulad')) return '#64748b';
+        return '#ef4444';
+    });
+
+    const data = [{
+        type: 'bar',
+        x: labels,
+        y: values,
+        marker: {
+            color: colors,
+            line: { color: 'rgba(255,255,255,0.1)', width: 1 }
         },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'right',
-                    labels: { color: 'rgba(255,255,255,0.7)', font: { size: 11 } }
-                }
-            },
-            cutout: '70%'
+        text: values.map(v => String(v)),
+        textposition: 'outside',
+        textfont: { color: 'rgba(255,255,255,0.7)', size: 12 },
+        hovertemplate: '<b>%{x}</b><br>Pedidos: %{y}<extra></extra>'
+    }];
+
+    const layout = {
+        ...PLOTLY_DARK_LAYOUT,
+        height: 300,
+        xaxis: {
+            tickfont: { size: 10, color: 'rgba(255,255,255,0.6)' },
+            tickangle: -20,
+            gridcolor: 'rgba(255,255,255,0.05)'
+        },
+        yaxis: {
+            gridcolor: 'rgba(255,255,255,0.06)',
+            tickfont: { color: 'rgba(255,255,255,0.5)' }
+        },
+        showlegend: false,
+        bargap: 0.3
+    };
+
+    Plotly.react(wf, data, layout, PLOTLY_CONFIG);
+    // Ocultar gráficos exclusivos de Auditoría cuando estamos en DUS
+    const treemapW = document.getElementById('treemap-chart-widget');
+    if (treemapW) treemapW.style.display = 'none';
+}
+
+/** Tendencia mensual — línea de procesados vs pendientes desde memoria */
+function updateTrendChart() {
+    const el = document.getElementById('trendChart');
+    const emptyEl = document.getElementById('trend-empty');
+    if (!el) return;
+
+    // Combinar datos de sesión actual + memoria
+    const mem = loadMemory(state.currentModule === 'dus' ? 'dus' : 'auditoria');
+    const currentData = state.currentModule === 'dus' ? state.dusResults : state.results;
+
+    // Construir mapa mes → {procesados, pendientes}
+    const monthly = {};
+
+    // Desde memoria
+    Object.entries(mem).forEach(([key, val]) => {
+        if (key.startsWith('_')) return;
+        const fecha = val.FECHA_GUARDADO || val.fecha;
+        if (!fecha) return;
+        const mes = String(fecha).slice(0, 7); // YYYY-MM
+        if (!monthly[mes]) monthly[mes] = { proc: 0, pend: 0 };
+        const est = val.ESTATUS_FINAL || '';
+        if (est.includes('✅') || est.includes('🚚') || est.includes('Legalizado')) {
+            monthly[mes].proc++;
+        } else {
+            monthly[mes].pend++;
         }
     });
+
+    // Desde sesión actual
+    const hoy = new Date().toISOString().slice(0, 7);
+    if (currentData && currentData.length > 0) {
+        if (!monthly[hoy]) monthly[hoy] = { proc: 0, pend: 0 };
+        currentData.forEach(r => {
+            const est = r.ESTATUS_FINAL || '';
+            if (est.includes('✅') || est.includes('🚚') || est.includes('Legalizado')) {
+                monthly[hoy].proc++;
+            } else {
+                monthly[hoy].pend++;
+            }
+        });
+    }
+
+    const meses = Object.keys(monthly).sort();
+    if (meses.length === 0) {
+        Plotly.purge(el);
+        if (emptyEl) emptyEl.style.display = 'flex';
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    const procData = meses.map(m => monthly[m].proc);
+    const pendData = meses.map(m => monthly[m].pend);
+    const labels = meses.map(m => {
+        const [y, mo] = m.split('-');
+        return new Date(y, mo - 1).toLocaleDateString('es-CL', { month: 'short', year: '2-digit' });
+    });
+
+    const data = [
+        {
+            type: 'scatter', mode: 'lines+markers',
+            name: 'Procesados',
+            x: labels, y: procData,
+            line: { color: '#10b981', width: 3, shape: 'spline' },
+            marker: { size: 8, color: '#10b981' },
+            fill: 'tozeroy',
+            fillcolor: 'rgba(16,185,129,0.08)'
+        },
+        {
+            type: 'scatter', mode: 'lines+markers',
+            name: 'Pendientes',
+            x: labels, y: pendData,
+            line: { color: '#ef4444', width: 3, shape: 'spline', dash: 'dot' },
+            marker: { size: 8, color: '#ef4444', symbol: 'diamond' }
+        }
+    ];
+
+    const layout = {
+        ...PLOTLY_DARK_LAYOUT,
+        height: 280,
+        showlegend: true,
+        legend: { x: 0, y: 1.15, orientation: 'h', font: { size: 11 } },
+        xaxis: { gridcolor: 'rgba(255,255,255,0.06)', tickfont: { size: 11 } },
+        yaxis: { gridcolor: 'rgba(255,255,255,0.06)', tickfont: { size: 11 }, title: 'Pedidos' }
+    };
+
+    Plotly.react(el, data, layout, PLOTLY_CONFIG);
+}
+
+/** Heatmap de demora promedio: analista (Y) × semáforo (X) */
+function updateHeatmapChart(results) {
+    const el = document.getElementById('heatmapChart');
+    const emptyEl = document.getElementById('heatmap-empty');
+    if (!el) return;
+
+    if (!results || results.length === 0) {
+        Plotly.purge(el);
+        if (emptyEl) emptyEl.style.display = 'flex';
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    // Agrupar por responsable × rango de demora
+    const ranges = ['0-3 días', '4-7 días', '8-14 días', '15+ días'];
+    const analystData = {};
+
+    results.forEach(r => {
+        const resp = r.RESPONSABLE || 'Sin Asignar';
+        const demora = parseInt(r.DEMORA) || 0;
+        if (!analystData[resp]) analystData[resp] = [0, 0, 0, 0];
+        if (demora <= 3)      analystData[resp][0]++;
+        else if (demora <= 7) analystData[resp][1]++;
+        else if (demora <= 14) analystData[resp][2]++;
+        else                  analystData[resp][3]++;
+    });
+
+    // Solo mostrar top 15 analistas con más pedidos
+    const analysts = Object.entries(analystData)
+        .sort((a, b) => b[1].reduce((s, v) => s + v, 0) - a[1].reduce((s, v) => s + v, 0))
+        .slice(0, 15);
+
+    if (analysts.length === 0) {
+        Plotly.purge(el);
+        if (emptyEl) emptyEl.style.display = 'flex';
+        return;
+    }
+
+    const yLabels = analysts.map(([name]) => {
+        const resolved = typeof resolveAnalystName === 'function' ? resolveAnalystName(name) : name;
+        return resolved.length > 18 ? resolved.slice(0, 15) + '…' : resolved;
+    });
+    const zData = analysts.map(([, counts]) => counts);
+
+    const data = [{
+        type: 'heatmap',
+        x: ranges,
+        y: yLabels,
+        z: zData,
+        colorscale: [
+            [0, 'rgba(16,185,129,0.15)'],
+            [0.33, 'rgba(245,158,11,0.4)'],
+            [0.66, 'rgba(249,115,22,0.6)'],
+            [1, 'rgba(239,68,68,0.85)']
+        ],
+        hovertemplate: '<b>%{y}</b><br>%{x}: %{z} pedidos<extra></extra>',
+        showscale: true,
+        colorbar: {
+            title: 'Pedidos',
+            titlefont: { size: 11, color: 'rgba(255,255,255,0.6)' },
+            tickfont: { color: 'rgba(255,255,255,0.5)' },
+            len: 0.8
+        }
+    }];
+
+    const h = Math.max(260, analysts.length * 32 + 80);
+    const layout = {
+        ...PLOTLY_DARK_LAYOUT,
+        height: h,
+        xaxis: { tickfont: { size: 11 }, side: 'top' },
+        yaxis: { tickfont: { size: 10 }, autorange: 'reversed' },
+        margin: { t: 50, r: 100, b: 20, l: 120 }
+    };
+
+    Plotly.react(el, data, layout, PLOTLY_CONFIG);
+}
+
+/** Treemap de distribución por cliente (solo Auditoría) */
+function updateTreemapChart(results) {
+    const el = document.getElementById('treemapChart');
+    const emptyEl = document.getElementById('treemap-empty');
+    const widget = document.getElementById('treemap-chart-widget');
+    if (!el) return;
+
+    // Solo visible en Auditoría
+    if (state.currentModule !== 'auditoria') {
+        if (widget) widget.style.display = 'none';
+        return;
+    }
+    if (widget) widget.style.display = '';
+
+    if (!results || results.length === 0) {
+        Plotly.purge(el);
+        if (emptyEl) emptyEl.style.display = 'flex';
+        return;
+    }
+    if (emptyEl) emptyEl.style.display = 'none';
+
+    // Agrupar por cliente
+    const clientMap = {};
+    results.forEach(r => {
+        const cliente = r.CLIENTE || 'Sin Cliente';
+        if (!clientMap[cliente]) clientMap[cliente] = { total: 0, proc: 0 };
+        clientMap[cliente].total++;
+        if (r.ESTATUS_FINAL.includes('✅') || r.ESTATUS_FINAL.includes('🚚')) {
+            clientMap[cliente].proc++;
+        }
+    });
+
+    // Top 20 clientes por volumen
+    const top = Object.entries(clientMap)
+        .sort((a, b) => b[1].total - a[1].total)
+        .slice(0, 20);
+
+    const labels = ['Clientes'];
+    const parents = [''];
+    const values = [0];
+    const colors = [0];
+    const texts = [''];
+
+    top.forEach(([name, { total, proc }]) => {
+        const pct = Math.round((proc / total) * 100);
+        const shortName = name.length > 22 ? name.slice(0, 19) + '…' : name;
+        labels.push(shortName);
+        parents.push('Clientes');
+        values.push(total);
+        colors.push(pct);
+        texts.push(`${total} pedidos · ${pct}% procesado`);
+    });
+
+    const data = [{
+        type: 'treemap',
+        labels: labels,
+        parents: parents,
+        values: values,
+        text: texts,
+        textinfo: 'label+text',
+        textfont: { size: 11 },
+        marker: {
+            colors: colors,
+            colorscale: [
+                [0, '#ef4444'],
+                [0.5, '#f59e0b'],
+                [1, '#10b981']
+            ],
+            line: { width: 1, color: 'rgba(15,23,42,0.6)' },
+            showscale: true,
+            colorbar: {
+                title: '% Cumpl.',
+                titlefont: { size: 10, color: 'rgba(255,255,255,0.6)' },
+                tickfont: { color: 'rgba(255,255,255,0.5)' },
+                len: 0.6,
+                ticksuffix: '%'
+            }
+        },
+        hovertemplate: '<b>%{label}</b><br>%{text}<extra></extra>',
+        pathbar: { visible: false }
+    }];
+
+    const layout = {
+        ...PLOTLY_DARK_LAYOUT,
+        height: 350,
+        margin: { t: 10, r: 10, b: 10, l: 10 }
+    };
+
+    Plotly.react(el, data, layout, PLOTLY_CONFIG);
 }
 
 function cleanPedido(val) {
@@ -1652,50 +1991,7 @@ function getDUSEstadoGeneral(estatusFinal) {
     return                           { label: '❌ Pendiente',   badgeClass: 'badge-red' };
 }
 
-function updateChartForDUS(results) {
-    const ctx = document.getElementById('mainChart').getContext('2d');
-    if (state.chart) state.chart.destroy();
-    if (!results || results.length === 0) return;
-
-    const counts = {};
-    results.forEach(r => {
-        counts[r.ESTATUS_FINAL] = (counts[r.ESTATUS_FINAL] || 0) + 1;
-    });
-
-    const total = results.length;
-    const labels = Object.keys(counts).map(key => {
-        const pct = ((counts[key] / total) * 100).toFixed(1);
-        return `${key} (${pct}%)`;
-    });
-    const data = Object.values(counts);
-
-    state.chart = new Chart(ctx, {
-        type: 'pie',
-        data: {
-            labels: labels,
-            datasets: [{
-                data: data,
-                backgroundColor: labels.map((l, i) => {
-                    if (l.includes('✅')) return '#10b981'; // Nivel completado
-                    if (l.includes('IVV')) return '#f59e0b'; // Naranja para IVV
-                    const pendingColors = ['#ef4444', '#f87171', '#f43f5e', '#e11d48', '#fb7185', '#fda4af', '#9f1239'];
-                    return pendingColors[i % pendingColors.length];
-                }),
-                borderWidth: 0
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: {
-                    position: 'right',
-                    labels: { color: 'rgba(255,255,255,0.7)', font: { size: 10 } }
-                }
-            }
-        }
-    });
-}
+// updateChartForDUS movido arriba junto con las funciones Plotly (ver sección PLOTLY.JS)
 
 function exportToExcel() {
     const isAuditoria = state.currentModule === 'auditoria';

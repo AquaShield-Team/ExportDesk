@@ -17,6 +17,8 @@
     <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
     <!-- Chart.js — versión fija (mismo criterio que OBS-2) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1"></script>
+    <!-- Plotly.js — gráficos interactivos avanzados (versión fija) -->
+    <script src="https://cdn.jsdelivr.net/npm/plotly.js-dist@2.32.0/plotly.min.js"></script>
     <!-- ExcelJS (para embeber imágenes en Excel) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
 </head>
@@ -158,8 +160,54 @@
                     <div class="widget-header">
                         <h3><i data-lucide="pie-chart"></i> Cumplimiento Global</h3>
                     </div>
-                    <div class="chart-container">
-                        <canvas id="mainChart"></canvas>
+                    <div class="plotly-container">
+                        <div id="gaugeChart"></div>
+                        <div id="waterfallChart" style="display:none;"></div>
+                    </div>
+                </div>
+
+                <!-- Tendencia Mensual (Plotly) -->
+                <div class="widget-card glass chart-widget" id="trend-chart-widget">
+                    <div class="widget-header">
+                        <h3><i data-lucide="trending-up"></i> Tendencia Mensual</h3>
+                        <span class="widget-badge">Histórico</span>
+                    </div>
+                    <div class="plotly-container">
+                        <div id="trendChart"></div>
+                    </div>
+                    <div id="trend-empty" class="empty-state" style="display:none;">
+                        <i data-lucide="bar-chart"></i>
+                        <p>Sin datos históricos. Ejecuta análisis para acumular tendencia.</p>
+                    </div>
+                </div>
+
+                <!-- Heatmap Demora x Analista (Plotly) -->
+                <div class="widget-card glass chart-widget" id="heatmap-chart-widget">
+                    <div class="widget-header">
+                        <h3><i data-lucide="flame"></i> Mapa de Calor — Demora por Analista</h3>
+                        <span class="widget-badge">Sesión Actual</span>
+                    </div>
+                    <div class="plotly-container">
+                        <div id="heatmapChart"></div>
+                    </div>
+                    <div id="heatmap-empty" class="empty-state" style="display:none;">
+                        <i data-lucide="grid"></i>
+                        <p>Ejecuta un análisis para ver el mapa de calor.</p>
+                    </div>
+                </div>
+
+                <!-- Treemap Clientes (Plotly, solo Auditoría) -->
+                <div class="widget-card glass chart-widget" id="treemap-chart-widget">
+                    <div class="widget-header">
+                        <h3><i data-lucide="layout-grid"></i> Distribución por Cliente</h3>
+                        <span class="widget-badge">Auditoría</span>
+                    </div>
+                    <div class="plotly-container">
+                        <div id="treemapChart"></div>
+                    </div>
+                    <div id="treemap-empty" class="empty-state" style="display:none;">
+                        <i data-lucide="pie-chart"></i>
+                        <p>Ejecuta un análisis para ver la distribución por cliente.</p>
                     </div>
                 </div>
 

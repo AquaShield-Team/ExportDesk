@@ -1216,3 +1216,32 @@ th.sortable.sort-desc { color: var(--blue); }
     from { opacity: 0; transform: translateY(20px); }
     to   { opacity: 1; transform: translateY(0); }
 }
+
+/* =============================================================
+   OBS WIDGET COLLAPSE / EXPAND
+   ============================================================= */
+
+.obs-chevron {
+    transition: transform 0.3s ease;
+    width: 18px;
+    height: 18px;
+    color: rgba(255,255,255,0.5);
+}
+
+.obs-collapse-trigger:hover .obs-chevron {
+    color: rgba(255,255,255,0.8);
+}
+
+.obs-collapsible-body {
+    max-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: max-height 0.35s ease, opacity 0.25s ease, margin 0.35s ease;
+    margin-top: 0;
+}
+
+.obs-collapsible-body.obs-expanded {
+    max-height: 600px;
+    opacity: 1;
+    margin-top: 10px;
+}

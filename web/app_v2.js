@@ -1934,9 +1934,16 @@ function renderDUS(selected = []) {
 
     // Aplicar búsqueda de texto
     filtered = applySearch(filtered, state.searchQuery, true);
-    // Aplicar filtro de grupo
+    // Aplicar filtro de grupo — FIX: comparar tanto código SAP como nombre completo
+    // porque en DUS el RESPONSABLE puede venir como nombre largo ("MRAMIREZ") o vía de transporte
     const gFilter = getGrupoAnalysts();
-    if (gFilter) filtered = filtered.filter(d => gFilter.has(String(d.RESPONSABLE || '').toUpperCase().trim()));
+    if (gFilter) {
+        const gFilterNames = getGrupoAnalystNames();
+        filtered = filtered.filter(d => {
+            const resp = String(d.RESPONSABLE || '').toUpperCase().trim();
+            return gFilter.has(resp) || gFilterNames.has(resp);
+        });
+    }
     // Aplicar orden de columna
     const ss = state.sortStateDUS;
     filtered = sortResults(filtered.map(d => ({...d, _isDUS: true})), ss.col, ss.dir);
@@ -2261,6 +2268,24 @@ function getGrupoAnalysts() {
         if (g === state.activeGrupo) codes.add(code.toUpperCase().trim());
     });
     return codes;
+}
+
+/** Devuelve Set de nombres completos (uppercase) del grupo activo.
+ *  Usado en DUS donde el RESPONSABLE puede ser el nombre largo del analista */
+function getGrupoAnalystNames() {
+    if (!state.activeGrupo) return new Set();
+    const dir = loadTeamDirectory();
+    const names = new Set();
+    Object.entries(dir).forEach(([code, entry]) => {
+        const g = typeof entry === 'string' ? null : (entry.grupo || null);
+        const name = typeof entry === 'string' ? entry : (entry.name || '');
+        if (g === state.activeGrupo) {
+            names.add(name.toUpperCase().trim());
+            // También agregar el código por si acaso
+            names.add(code.toUpperCase().trim());
+        }
+    });
+    return names;
 }
 
 /** Activa un grupo y re-renderiza todo */
@@ -3037,3 +3062,15 @@ function setupObsWidget() {
     if (notaInput) notaInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') addObsManual(); });
     renderObsList();
 }
+
+/** Toggle expand/collapse of DUS Observaciones widget body */
+function toggleObsWidget() {
+    const body = document.getElementById('obs-collapsible-body');
+    const chevron = document.getElementById('obs-chevron');
+    if (!body) return;
+    const isOpen = body.classList.toggle('obs-expanded');
+    if (chevron) {
+        chevron.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
+    }
+}
+

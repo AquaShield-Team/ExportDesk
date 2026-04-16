@@ -2214,21 +2214,24 @@ function saveTeamDirectory(dir) {
 /** Pre-carga el listado de analistas conocidos (solo si el código no existe aún) */
 function seedTeamDirectory() {
     const defaultTeam = {
-        'CZAMORANO':   'Cristina Zamorano',
-        'DPINCOL':     'Daphne Pincol',
-        'EMARTINEZG':  'Eugenia Martínez',
-        'ESILVAJ':     'Evelyn Silva',
-        'GCHACANO':    'Gina Chacano',
-        'JOSANCHEZM':  'Jonathan Sánchez',
-        'LCONEJEROSM': 'Libni Conejeros',
-        'MIFIGUEROA':  'Matías Figueroa',
-        'MNSOTO':      'Matías Soto',
-        'MRAMIREZ':    'Marcelo Ramírez',
-        'SMOHOR':      'Scandar Mohor',
-        'SNAGUIL':     'Soraya Naguil',
-        'VVENEGAS':    'Victor Venegas',
-        'XLEICHTLE':   'Ximena Leichtle',
-        'YVALERO':     'Andreina Valero'
+        // ❄️ Congelado
+        'EMARTINEZG':  { name: 'Eugenia Martínez',   grupo: 'congelado' },
+        'GCHACANO':    { name: 'Gina Chacano',        grupo: 'congelado' },
+        'JOSANCHEZM':  { name: 'Jonathan Sánchez',    grupo: 'congelado' },
+        'LCONEJEROSM': { name: 'Libni Conejeros',     grupo: 'congelado' },
+        'MIFIGUEROA':  { name: 'Matías Figueroa',     grupo: 'congelado' },
+        'MNSOTO':      { name: 'Matías Soto',         grupo: 'congelado' },
+        'MRAMIREZ':    { name: 'Marcelo Ramírez',     grupo: 'congelado' },
+        'SNAGUIL':     { name: 'Soraya Naguil',       grupo: 'congelado' },
+        'YVALERO':     { name: 'Andreina Valero',     grupo: 'congelado' },
+        // 🌿 Fresco
+        'CZAMORANO':   { name: 'Cristina Zamorano',   grupo: 'fresco' },
+        'DPINCOL':     { name: 'Daphne Pincol',       grupo: 'fresco' },
+        'ESILVAJ':     { name: 'Evelyn Silva',        grupo: 'fresco' },
+        'SMOHOR':      { name: 'Scandar Mohor',       grupo: 'fresco' },
+        'VVENEGAS':    { name: 'Victor Venegas',      grupo: 'fresco' },
+        // Sin grupo
+        'XLEICHTLE':   { name: 'Ximena Leichtle',     grupo: null }
     };
     const dir = loadTeamDirectory();
     let changed = false;
@@ -2239,8 +2242,15 @@ function seedTeamDirectory() {
             changed = true;
         }
     });
-    Object.entries(defaultTeam).forEach(([code, name]) => {
-        if (!dir[code]) { dir[code] = { name, grupo: null }; changed = true; }
+    Object.entries(defaultTeam).forEach(([code, seed]) => {
+        if (!dir[code]) {
+            dir[code] = seed;
+            changed = true;
+        } else if (dir[code].grupo === null && seed.grupo !== null) {
+            // Actualizar grupo si el seed tiene uno y el actual no
+            dir[code].grupo = seed.grupo;
+            changed = true;
+        }
     });
     if (changed) saveTeamDirectory(dir);
 }

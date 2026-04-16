@@ -438,7 +438,7 @@ function identifyExcel(data, filename = "") {
             if (hasMatch('estado dus') || hasMatch('aprob.dus')) return 'dus';
             if (hasMatch('analista asignado') || (hasMatch('cliente') && hasMatch('responsable'))) return 'maestro';
             if (hasMatch('factura') && hasMatch('creado por')) return 'analistas';
-            if (hasMatch('estado auditoría') && hasMatch('motivo')) return 'procesados';
+            if ((hasMatch('estado auditoría') && hasMatch('motivo')) || (hasMatch('pedido flujo') && hasMatch('motivo'))) return 'procesados';
             if (hasMatch('bl') || hasMatch('bill') || hasMatch('lading') || hasMatch('pedido')) return 'bl';
         }
     }

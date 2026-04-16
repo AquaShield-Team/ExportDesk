@@ -3097,6 +3097,12 @@ function toggleObsWidget() {
 // KPI ENGINE — Panel de Indicadores Clave
 // =============================================================
 
+/** Helper global: detecta si un ESTATUS_FINAL ya está "gestionado"
+ *  (procesado, terrestre, legalizado, o validado manualmente) */
+function isGestionado(est) {
+    return est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado') || est.includes('Validado Manualmente');
+}
+
 /** Calcula todos los KPIs a partir de los resultados actuales */
 function calculateKPIs(results) {
     if (!results || results.length === 0) return null;
@@ -3115,28 +3121,21 @@ function calculateKPIs(results) {
     // --- SLA: dentro de 3 días ---
     const dentroPlazo = results.filter(r => {
         const d = parseInt(r.DEMORA) || 0;
-        const est = r.ESTATUS_FINAL || '';
-        // Solo contar procesados/legalizados para SLA
-        return (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) && d <= 3;
+        return isGestionado(r.ESTATUS_FINAL || '') && d <= 3;
     }).length;
-    const totalProcesados = results.filter(r => {
-        const est = r.ESTATUS_FINAL || '';
-        return est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado');
-    }).length;
+    const totalProcesados = results.filter(r => isGestionado(r.ESTATUS_FINAL || '')).length;
     const slaPct = totalProcesados > 0 ? Math.round((dentroPlazo / totalProcesados) * 100) : 0;
 
-    // --- En Riesgo (>7 días, no procesados) ---
+    // --- En Riesgo (>7 días, no gestionados) ---
     const enRiesgo = results.filter(r => {
         const d = parseInt(r.DEMORA) || 0;
-        const est = r.ESTATUS_FINAL || '';
-        return d > 7 && !est.includes('\u2705') && !est.includes('\ud83d\ude9a') && !est.includes('Legalizado');
+        return d > 7 && !isGestionado(r.ESTATUS_FINAL || '');
     }).length;
 
-    // --- Críticos (>14 días, no procesados) ---
+    // --- Críticos (>14 días, no gestionados) ---
     const criticos = results.filter(r => {
         const d = parseInt(r.DEMORA) || 0;
-        const est = r.ESTATUS_FINAL || '';
-        return d > 14 && !est.includes('\u2705') && !est.includes('\ud83d\ude9a') && !est.includes('Legalizado');
+        return d > 14 && !isGestionado(r.ESTATUS_FINAL || '');
     }).length;
 
     // --- T. Gestión Promedio (solo Auditoría, Factura → BL) ---
@@ -3157,7 +3156,7 @@ function calculateKPIs(results) {
         if (!porAnalista[resp]) porAnalista[resp] = { total: 0, proc: 0, demoras: [], tgestiones: [] };
         porAnalista[resp].total++;
         const est = r.ESTATUS_FINAL || '';
-        if (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) porAnalista[resp].proc++;
+        if (isGestionado(est)) porAnalista[resp].proc++;
         if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porAnalista[resp].demoras.push(r.DEMORA);
         if (typeof r.T_GESTIÓN === 'number' && r.T_GESTIÓN >= 0) porAnalista[resp].tgestiones.push(r.T_GESTIÓN);
     });
@@ -3174,7 +3173,7 @@ function calculateKPIs(results) {
         if (!porMes[mes]) porMes[mes] = { total: 0, proc: 0, demoras: [] };
         porMes[mes].total++;
         const est = r.ESTATUS_FINAL || '';
-        if (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) porMes[mes].proc++;
+        if (isGestionado(est)) porMes[mes].proc++;
         if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porMes[mes].demoras.push(r.DEMORA);
     });
 
@@ -3185,7 +3184,7 @@ function calculateKPIs(results) {
         if (!porCliente[cli]) porCliente[cli] = { total: 0, proc: 0, demoras: [] };
         porCliente[cli].total++;
         const est = r.ESTATUS_FINAL || '';
-        if (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) porCliente[cli].proc++;
+        if (isGestionado(est)) porCliente[cli].proc++;
         if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porCliente[cli].demoras.push(r.DEMORA);
     });
 
@@ -3348,7 +3347,7 @@ function exportKPIExcel() {
         .filter(r => {
             const d = parseInt(r.DEMORA) || 0;
             const est = r.ESTATUS_FINAL || '';
-            return d > 7 && !est.includes('\u2705') && !est.includes('\ud83d\ude9a') && !est.includes('Legalizado');
+            return d > 7 && !isGestionado(est);
         })
         .sort((a, b) => (b.DEMORA || 0) - (a.DEMORA || 0))
         .forEach(r => {

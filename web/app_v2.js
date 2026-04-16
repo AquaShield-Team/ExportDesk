@@ -3110,13 +3110,15 @@ function calculateKPIs(results) {
     const isDUS = state.currentModule === 'dus';
     const total = results.length;
 
-    // --- Demoras ---
-    const demoras = results
-        .filter(r => typeof r.DEMORA === 'number' && r.DEMORA > 0)
+    // --- Demoras (solo pedidos PENDIENTES — los gestionados inflan el promedio
+    //     porque su demora cuenta hasta hoy, no hasta cuando se proceso) ---
+    const demorasPendientes = results
+        .filter(r => typeof r.DEMORA === 'number' && r.DEMORA > 0 && !isGestionado(r.ESTATUS_FINAL || ''))
         .map(r => r.DEMORA);
-    const demoraPromedio = demoras.length > 0
-        ? (demoras.reduce((a, b) => a + b, 0) / demoras.length)
+    const demoraPromedio = demorasPendientes.length > 0
+        ? (demorasPendientes.reduce((a, b) => a + b, 0) / demorasPendientes.length)
         : 0;
+    const totalPendientes = demorasPendientes.length;
 
     // --- SLA: dentro de 3 días ---
     const dentroPlazo = results.filter(r => {
@@ -3189,7 +3191,7 @@ function calculateKPIs(results) {
     });
 
     return {
-        total, totalProcesados, demoraPromedio, slaPct, dentroPlazo,
+        total, totalProcesados, totalPendientes, demoraPromedio, slaPct, dentroPlazo,
         enRiesgo, criticos, tGestionProm,
         porAnalista, porMes, porCliente
     };
@@ -3223,7 +3225,7 @@ function renderKPIPanel(results) {
     setCard('kpi-demora', dp + 'd',
         kpis.demoraPromedio <= 3 ? 'kpi-green' : kpis.demoraPromedio <= 7 ? 'kpi-yellow' : 'kpi-red');
     const dpSub = document.getElementById('kpi-demora-sub');
-    if (dpSub) dpSub.textContent = `de ${kpis.total} pedidos`;
+    if (dpSub) dpSub.textContent = `${kpis.totalPendientes} pendientes`;
 
     // 2. SLA %
     setCard('kpi-sla', kpis.slaPct + '%',

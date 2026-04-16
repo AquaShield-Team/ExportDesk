@@ -1078,12 +1078,15 @@ const parseExcelDate = excelSerialToDate;
 function calculateSemaforo(fecha) {
     if (!fecha) return "⚪ N/A";
     // P-05: usar state.fechaHoy en vez de new Date() para consistencia con DEMORA.
-    // Sin esto, si el dashboard queda abierto de un día al otro, SEMÁFORO usa "mañana"
-    // pero DEMORA sigue usando "ayer" → discrepancia de 1 día en los umbrales.
     const hoy = new Date(state.fechaHoy);
     hoy.setHours(0, 0, 0, 0);
-    if (fecha > hoy) return "💀 Rojo Crítico";
-    const dias = Math.floor((hoy - fecha) / (1000 * 60 * 60 * 24));
+    // FIX: normalizar fecha de factura a medianoche antes de comparar.
+    // Sin esto, una factura de hoy con hora > 00:00 se detectaba como "futura".
+    // Error Fecha solo debe dispararse para MAÑANA en adelante (estrictamente futuro).
+    const fechaNorm = new Date(fecha);
+    fechaNorm.setHours(0, 0, 0, 0);
+    if (fechaNorm > hoy) return "💀 Rojo Crítico";
+    const dias = Math.floor((hoy - fechaNorm) / (1000 * 60 * 60 * 24));
     if (dias <= 3) return "🟢 Verde";
     if (dias <= 7) return "🟠 Naranja";
     return "🔴 Rojo";

@@ -3160,7 +3160,7 @@ function calculateKPIs(results) {
         porAnalista[resp].total++;
         const est = r.ESTATUS_FINAL || '';
         if (isGestionado(est)) porAnalista[resp].proc++;
-        if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porAnalista[resp].demoras.push(r.DEMORA);
+        if (typeof r.DEMORA === 'number' && r.DEMORA > 0 && !isGestionado(est)) porAnalista[resp].demoras.push(r.DEMORA);
         if (typeof r.T_GESTIÓN === 'number' && r.T_GESTIÓN >= 0) porAnalista[resp].tgestiones.push(r.T_GESTIÓN);
     });
 
@@ -3177,7 +3177,7 @@ function calculateKPIs(results) {
         porMes[mes].total++;
         const est = r.ESTATUS_FINAL || '';
         if (isGestionado(est)) porMes[mes].proc++;
-        if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porMes[mes].demoras.push(r.DEMORA);
+        if (typeof r.DEMORA === 'number' && r.DEMORA > 0 && !isGestionado(est)) porMes[mes].demoras.push(r.DEMORA);
     });
 
     // --- Por Cliente ---
@@ -3188,7 +3188,7 @@ function calculateKPIs(results) {
         porCliente[cli].total++;
         const est = r.ESTATUS_FINAL || '';
         if (isGestionado(est)) porCliente[cli].proc++;
-        if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porCliente[cli].demoras.push(r.DEMORA);
+        if (typeof r.DEMORA === 'number' && r.DEMORA > 0 && !isGestionado(est)) porCliente[cli].demoras.push(r.DEMORA);
     });
 
     return {
@@ -3302,6 +3302,15 @@ function exportKPIExcel() {
         }
     }
 
+    function styleDemoraCol(ws, rows, colIdx) {
+        for (let r = 1; r <= rows; r++) {
+            const addr = XLSX.utils.encode_cell({ r, c: colIdx });
+            if (!ws[addr] || ws[addr].v === '-') continue;
+            const val = parseFloat(ws[addr].v) || 0;
+            ws[addr].s = val <= 3 ? sGreen : val <= 7 ? sYellow : sRed;
+        }
+    }
+
     // ═══ Hoja 1: Resumen ═══
     const estadoDemora = kpis.demoraPromedio <= 3 ? '🟢 Verde' : kpis.demoraPromedio <= 7 ? '🟠 Naranja' : '🔴 Rojo';
     const estadoSLA    = kpis.slaPct >= 85 ? '🟢 Verde' : kpis.slaPct >= 60 ? '🟠 Naranja' : '🔴 Rojo';
@@ -3359,6 +3368,7 @@ function exportKPIExcel() {
     wsAnal['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
     styleHeaders(wsAnal, 9);
     styleCumplCol(wsAnal, analRows.length - 1, 5); // Col F = % CUMPL.
+    styleDemoraCol(wsAnal, analRows.length - 1, 6); // Col G = DEMORA PROM.
     XLSX.utils.book_append_sheet(wb, wsAnal, 'Por Analista');
 
     // ═══ Hoja 3: Por Mes ═══
@@ -3375,6 +3385,7 @@ function exportKPIExcel() {
     wsMes['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }];
     styleHeaders(wsMes, 6);
     styleCumplCol(wsMes, mesRows.length - 1, 3); // Col D = % CUMPL.
+    styleDemoraCol(wsMes, mesRows.length - 1, 4); // Col E = DEMORA PROM.
     XLSX.utils.book_append_sheet(wb, wsMes, 'Por Mes');
 
     // ═══ Hoja 4: Por Cliente ═══
@@ -3391,6 +3402,7 @@ function exportKPIExcel() {
     wsCli['!cols'] = [{ wch: 30 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }];
     styleHeaders(wsCli, 5);
     styleCumplCol(wsCli, cliRows.length - 1, 3); // Col D = % CUMPL.
+    styleDemoraCol(wsCli, cliRows.length - 1, 4); // Col E = DEMORA PROM.
     XLSX.utils.book_append_sheet(wb, wsCli, 'Por Cliente');
 
     // ═══ Hoja 5: Detalle Riesgo (>7 días, no gestionados) ═══
@@ -3416,13 +3428,8 @@ function exportKPIExcel() {
     const wsRiesgo = XLSX.utils.aoa_to_sheet(riesgoRows);
     wsRiesgo['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 22 }, { wch: 14 }, { wch: 24 }, { wch: 14 }];
     styleHeaders(wsRiesgo, 6);
-    // Colorear demora: >14d rojo, >7d naranja
-    for (let r = 1; r <= riesgoData.length; r++) {
-        const addr = XLSX.utils.encode_cell({ r, c: 3 }); // Col D = DEMORA
-        if (!wsRiesgo[addr]) continue;
-        const d = parseInt(wsRiesgo[addr].v) || 0;
-        wsRiesgo[addr].s = d > 14 ? sRed : sYellow;
-    }
+    // Colorear demora: 1-3 verde, 4-7 amarillo, 8+ rojo
+    styleDemoraCol(wsRiesgo, riesgoData.length, 3); // Col D = DEMORA
     XLSX.utils.book_append_sheet(wb, wsRiesgo, 'Detalle Riesgo');
 
     const fileName = `KPI_ExportDesk_${mod}_${new Date().toISOString().slice(0, 10)}.xlsx`;

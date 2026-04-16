@@ -1245,3 +1245,86 @@ th.sortable.sort-desc { color: var(--blue); }
     opacity: 1;
     margin-top: 10px;
 }
+
+/* =============================================================
+   KPI PANEL
+   ============================================================= */
+
+.kpi-cards-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.kpi-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 14px 12px;
+    text-align: center;
+    transition: all 0.3s ease;
+    position: relative;
+    overflow: hidden;
+}
+
+.kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: rgba(255,255,255,0.1);
+    transition: background 0.3s ease;
+}
+
+.kpi-card:hover {
+    background: rgba(255,255,255,0.07);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+}
+
+.kpi-card.kpi-green::before { background: #10b981; }
+.kpi-card.kpi-yellow::before { background: #f59e0b; }
+.kpi-card.kpi-red::before { background: #ef4444; }
+.kpi-card.kpi-critical::before { background: #dc2626; box-shadow: 0 0 12px rgba(220,38,38,0.4); }
+
+.kpi-card.kpi-green { border-color: rgba(16,185,129,0.25); }
+.kpi-card.kpi-yellow { border-color: rgba(245,158,11,0.25); }
+.kpi-card.kpi-red { border-color: rgba(239,68,68,0.25); }
+.kpi-card.kpi-critical { border-color: rgba(220,38,38,0.4); }
+
+.kpi-label {
+    font-size: 0.7rem;
+    color: rgba(255,255,255,0.45);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.kpi-value {
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: #e2e8f0;
+    line-height: 1.1;
+}
+
+.kpi-card.kpi-green .kpi-value { color: #34d399; }
+.kpi-card.kpi-yellow .kpi-value { color: #fbbf24; }
+.kpi-card.kpi-red .kpi-value { color: #f87171; }
+.kpi-card.kpi-critical .kpi-value { color: #fca5a5; animation: kpiPulse 2s ease-in-out infinite; }
+
+.kpi-sub {
+    font-size: 0.65rem;
+    color: rgba(255,255,255,0.3);
+    margin-top: 4px;
+}
+
+.kpi-download-btn {
+    font-size: 0.75rem !important;
+    padding: 6px 12px !important;
+}
+
+@keyframes kpiPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}

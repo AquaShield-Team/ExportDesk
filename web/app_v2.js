@@ -270,6 +270,9 @@ function switchTab(module) {
             obsWidget._obsSetup = true;
         }
     }
+
+    // KPI Panel: actualizar según módulo activo
+    renderKPIPanel(isAuditoria ? state.results : state.dusResults);
 }
 
 function updateDynamicFilters(results, containerId, triggerId, labelId, renderFn, module) {
@@ -745,6 +748,8 @@ function runAudit() {
             }
             // Plotly: actualizar tendencia y heatmap con los datos frescos
             updateTrendChart();
+            // KPI Panel: actualizar indicadores
+            renderKPIPanel(state.currentModule === 'dus' ? state.dusResults : state.results);
             if(exportBtn) exportBtn.disabled = false;
             if(exportBtnDus) exportBtnDus.disabled = false;
             // Auto-guardar en memoria los registros procesados/legalizados
@@ -1414,6 +1419,7 @@ function updateChart(results) {
     updateTrendChart();
     updateHeatmapChart(results);
     updateTreemapChart(results);
+    renderKPIPanel(results);
 }
 
 /** Waterfall DUS — pipeline visual del flujo de legalización */
@@ -3085,5 +3091,282 @@ function toggleObsWidget() {
     if (chevron) {
         chevron.style.transform = isOpen ? 'rotate(180deg)' : 'rotate(0deg)';
     }
+}
+
+// =============================================================
+// KPI ENGINE — Panel de Indicadores Clave
+// =============================================================
+
+/** Calcula todos los KPIs a partir de los resultados actuales */
+function calculateKPIs(results) {
+    if (!results || results.length === 0) return null;
+
+    const isDUS = state.currentModule === 'dus';
+    const total = results.length;
+
+    // --- Demoras ---
+    const demoras = results
+        .filter(r => typeof r.DEMORA === 'number' && r.DEMORA > 0)
+        .map(r => r.DEMORA);
+    const demoraPromedio = demoras.length > 0
+        ? (demoras.reduce((a, b) => a + b, 0) / demoras.length)
+        : 0;
+
+    // --- SLA: dentro de 3 días ---
+    const dentroPlazo = results.filter(r => {
+        const d = parseInt(r.DEMORA) || 0;
+        const est = r.ESTATUS_FINAL || '';
+        // Solo contar procesados/legalizados para SLA
+        return (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) && d <= 3;
+    }).length;
+    const totalProcesados = results.filter(r => {
+        const est = r.ESTATUS_FINAL || '';
+        return est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado');
+    }).length;
+    const slaPct = totalProcesados > 0 ? Math.round((dentroPlazo / totalProcesados) * 100) : 0;
+
+    // --- En Riesgo (>7 días, no procesados) ---
+    const enRiesgo = results.filter(r => {
+        const d = parseInt(r.DEMORA) || 0;
+        const est = r.ESTATUS_FINAL || '';
+        return d > 7 && !est.includes('\u2705') && !est.includes('\ud83d\ude9a') && !est.includes('Legalizado');
+    }).length;
+
+    // --- Críticos (>14 días, no procesados) ---
+    const criticos = results.filter(r => {
+        const d = parseInt(r.DEMORA) || 0;
+        const est = r.ESTATUS_FINAL || '';
+        return d > 14 && !est.includes('\u2705') && !est.includes('\ud83d\ude9a') && !est.includes('Legalizado');
+    }).length;
+
+    // --- T. Gestión Promedio (solo Auditoría, Factura → BL) ---
+    let tGestionProm = null;
+    if (!isDUS) {
+        const tGestiones = results
+            .filter(r => typeof r.T_GESTIÓN === 'number' && r.T_GESTIÓN >= 0)
+            .map(r => r.T_GESTIÓN);
+        if (tGestiones.length > 0) {
+            tGestionProm = (tGestiones.reduce((a, b) => a + b, 0) / tGestiones.length);
+        }
+    }
+
+    // --- Por Analista ---
+    const porAnalista = {};
+    results.forEach(r => {
+        const resp = r.RESPONSABLE || 'Sin Asignar';
+        if (!porAnalista[resp]) porAnalista[resp] = { total: 0, proc: 0, demoras: [], tgestiones: [] };
+        porAnalista[resp].total++;
+        const est = r.ESTATUS_FINAL || '';
+        if (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) porAnalista[resp].proc++;
+        if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porAnalista[resp].demoras.push(r.DEMORA);
+        if (typeof r.T_GESTIÓN === 'number' && r.T_GESTIÓN >= 0) porAnalista[resp].tgestiones.push(r.T_GESTIÓN);
+    });
+
+    // --- Por Mes ---
+    const porMes = {};
+    results.forEach(r => {
+        let mes = 'Sin Fecha';
+        if (r.FECHA_FACTURA instanceof Date && !isNaN(r.FECHA_FACTURA)) {
+            mes = r.FECHA_FACTURA.toISOString().slice(0, 7);
+        } else if (r.FECHA_FACTURA_DATE instanceof Date && !isNaN(r.FECHA_FACTURA_DATE)) {
+            mes = r.FECHA_FACTURA_DATE.toISOString().slice(0, 7);
+        }
+        if (!porMes[mes]) porMes[mes] = { total: 0, proc: 0, demoras: [] };
+        porMes[mes].total++;
+        const est = r.ESTATUS_FINAL || '';
+        if (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) porMes[mes].proc++;
+        if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porMes[mes].demoras.push(r.DEMORA);
+    });
+
+    // --- Por Cliente ---
+    const porCliente = {};
+    results.forEach(r => {
+        const cli = r.CLIENTE || r.CONSIGNATARIO || 'Sin Cliente';
+        if (!porCliente[cli]) porCliente[cli] = { total: 0, proc: 0, demoras: [] };
+        porCliente[cli].total++;
+        const est = r.ESTATUS_FINAL || '';
+        if (est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado')) porCliente[cli].proc++;
+        if (typeof r.DEMORA === 'number' && r.DEMORA > 0) porCliente[cli].demoras.push(r.DEMORA);
+    });
+
+    return {
+        total, totalProcesados, demoraPromedio, slaPct, dentroPlazo,
+        enRiesgo, criticos, tGestionProm,
+        porAnalista, porMes, porCliente
+    };
+}
+
+/** Renderiza las tarjetas KPI con semáforo */
+function renderKPIPanel(results) {
+    const panel = document.getElementById('kpi-panel-widget');
+    if (!panel) return;
+
+    const kpis = calculateKPIs(results);
+    if (!kpis) {
+        panel.style.display = 'none';
+        return;
+    }
+    panel.style.display = '';
+
+    // Helper: set card value + color
+    function setCard(id, value, color) {
+        const valEl = document.getElementById(id + '-val');
+        const cardEl = document.getElementById(id);
+        if (valEl) valEl.textContent = value;
+        if (cardEl) {
+            cardEl.classList.remove('kpi-green', 'kpi-yellow', 'kpi-red', 'kpi-critical');
+            if (color) cardEl.classList.add(color);
+        }
+    }
+
+    // 1. Demora Promedio
+    const dp = kpis.demoraPromedio.toFixed(1);
+    setCard('kpi-demora', dp + 'd',
+        kpis.demoraPromedio <= 3 ? 'kpi-green' : kpis.demoraPromedio <= 7 ? 'kpi-yellow' : 'kpi-red');
+    const dpSub = document.getElementById('kpi-demora-sub');
+    if (dpSub) dpSub.textContent = `de ${kpis.total} pedidos`;
+
+    // 2. SLA %
+    setCard('kpi-sla', kpis.slaPct + '%',
+        kpis.slaPct >= 85 ? 'kpi-green' : kpis.slaPct >= 60 ? 'kpi-yellow' : 'kpi-red');
+    const slaSub = document.getElementById('kpi-sla-sub');
+    if (slaSub) slaSub.textContent = `${kpis.dentroPlazo} de ${kpis.totalProcesados} en plazo`;
+
+    // 3. En Riesgo
+    const riesgoPct = kpis.total > 0 ? Math.round((kpis.enRiesgo / kpis.total) * 100) : 0;
+    setCard('kpi-riesgo', String(kpis.enRiesgo),
+        kpis.enRiesgo === 0 ? 'kpi-green' : riesgoPct <= 5 ? 'kpi-yellow' : 'kpi-red');
+    const rSub = document.getElementById('kpi-riesgo-sub');
+    if (rSub) rSub.textContent = `${riesgoPct}% del total`;
+
+    // 4. Críticos
+    setCard('kpi-criticos', String(kpis.criticos),
+        kpis.criticos === 0 ? 'kpi-green' : kpis.criticos <= 3 ? 'kpi-red' : 'kpi-critical');
+    const cSub = document.getElementById('kpi-criticos-sub');
+    if (cSub) cSub.textContent = kpis.criticos > 0 ? '¡Acción inmediata!' : 'Sin críticos';
+
+    // 5. T. Gestión
+    if (kpis.tGestionProm !== null) {
+        const tg = kpis.tGestionProm.toFixed(1);
+        setCard('kpi-tgestion', tg + 'd',
+            kpis.tGestionProm <= 5 ? 'kpi-green' : kpis.tGestionProm <= 10 ? 'kpi-yellow' : 'kpi-red');
+    } else {
+        setCard('kpi-tgestion', '—', null);
+    }
+
+    if (window.lucide) lucide.createIcons();
+}
+
+/** Exporta KPIs a Excel multi-hoja */
+function exportKPIExcel() {
+    const results = state.currentModule === 'dus' ? state.dusResults : state.results;
+    const kpis = calculateKPIs(results);
+    if (!kpis) { alert('Sin datos para exportar. Ejecuta un análisis primero.'); return; }
+
+    const wb = XLSX.utils.book_new();
+    const hoy = new Date().toLocaleDateString('es-CL');
+    const mod = state.currentModule === 'dus' ? 'DUS' : 'Auditoría';
+
+    // === Hoja 1: Resumen ===
+    const resumen = [
+        ['PANEL KPI — ExportDesk', '', '', hoy],
+        ['Módulo:', mod],
+        [],
+        ['INDICADOR', 'VALOR', 'ESTADO', 'DESCRIPCIÓN'],
+        ['Demora Promedio', kpis.demoraPromedio.toFixed(1) + ' días',
+            kpis.demoraPromedio <= 3 ? '🟢 Verde' : kpis.demoraPromedio <= 7 ? '🟠 Naranja' : '🔴 Rojo',
+            'Promedio de días de demora de todos los pedidos'],
+        ['SLA (≤3 días)', kpis.slaPct + '%',
+            kpis.slaPct >= 85 ? '🟢 Verde' : kpis.slaPct >= 60 ? '🟠 Naranja' : '🔴 Rojo',
+            kpis.dentroPlazo + ' de ' + kpis.totalProcesados + ' procesados dentro de plazo'],
+        ['En Riesgo (>7d)', kpis.enRiesgo,
+            kpis.enRiesgo === 0 ? '🟢 Verde' : '🔴 Rojo',
+            'Pedidos pendientes con más de 7 días de demora'],
+        ['Críticos (>14d)', kpis.criticos,
+            kpis.criticos === 0 ? '🟢 Verde' : '💀 Crítico',
+            'Pedidos pendientes con más de 14 días — requieren acción inmediata'],
+        ['T. Gestión Prom.', kpis.tGestionProm !== null ? kpis.tGestionProm.toFixed(1) + ' días' : 'N/A',
+            kpis.tGestionProm !== null ? (kpis.tGestionProm <= 5 ? '🟢 Verde' : '🟠 Naranja') : '⚪ N/A',
+            'Promedio de días entre factura y BL'],
+        [],
+        ['Total Pedidos', kpis.total],
+        ['Total Procesados', kpis.totalProcesados],
+        ['% Cumplimiento', kpis.total > 0 ? Math.round((kpis.totalProcesados / kpis.total) * 100) + '%' : '0%'],
+    ];
+    const wsResumen = XLSX.utils.aoa_to_sheet(resumen);
+    wsResumen['!cols'] = [{ wch: 22 }, { wch: 15 }, { wch: 14 }, { wch: 50 }];
+    XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
+
+    // === Hoja 2: Por Analista ===
+    const analRows = [['ANALISTA', 'CÓDIGO', 'GRUPO', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d', 'T. GESTIÓN PROM.']];
+    Object.entries(kpis.porAnalista)
+        .sort((a, b) => b[1].total - a[1].total)
+        .forEach(([code, data]) => {
+            const name = resolveAnalystName(code);
+            const grupo = resolveAnalystGrupo(code) || 'Sin grupo';
+            const cumpl = data.total > 0 ? Math.round((data.proc / data.total) * 100) : 0;
+            const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
+            const sla = data.demoras.length > 0 ? Math.round((data.demoras.filter(d => d <= 3).length / data.demoras.length) * 100) + '%' : '-';
+            const tg = data.tgestiones.length > 0 ? (data.tgestiones.reduce((a, b) => a + b, 0) / data.tgestiones.length).toFixed(1) : '-';
+            analRows.push([name, code, grupo, data.total, data.proc, cumpl + '%', demProm, sla, tg]);
+        });
+    const wsAnal = XLSX.utils.aoa_to_sheet(analRows);
+    wsAnal['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
+    XLSX.utils.book_append_sheet(wb, wsAnal, 'Por Analista');
+
+    // === Hoja 3: Por Mes ===
+    const mesRows = [['MES', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d']];
+    Object.entries(kpis.porMes)
+        .sort((a, b) => a[0].localeCompare(b[0]))
+        .forEach(([mes, data]) => {
+            const cumpl = data.total > 0 ? Math.round((data.proc / data.total) * 100) : 0;
+            const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
+            const sla = data.demoras.length > 0 ? Math.round((data.demoras.filter(d => d <= 3).length / data.demoras.length) * 100) + '%' : '-';
+            mesRows.push([mes, data.total, data.proc, cumpl + '%', demProm, sla]);
+        });
+    const wsMes = XLSX.utils.aoa_to_sheet(mesRows);
+    wsMes['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }];
+    XLSX.utils.book_append_sheet(wb, wsMes, 'Por Mes');
+
+    // === Hoja 4: Por Cliente ===
+    const cliRows = [['CLIENTE', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.']];
+    Object.entries(kpis.porCliente)
+        .sort((a, b) => b[1].total - a[1].total)
+        .slice(0, 50)
+        .forEach(([cli, data]) => {
+            const cumpl = data.total > 0 ? Math.round((data.proc / data.total) * 100) : 0;
+            const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
+            cliRows.push([cli, data.total, data.proc, cumpl + '%', demProm]);
+        });
+    const wsCli = XLSX.utils.aoa_to_sheet(cliRows);
+    wsCli['!cols'] = [{ wch: 30 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsCli, 'Por Cliente');
+
+    // === Hoja 5: Detalle Riesgo (>7 días, no procesados) ===
+    const riesgoRows = [['PEDIDO', 'CLIENTE/CONSIG.', 'RESPONSABLE', 'DEMORA (DÍAS)', 'ESTADO', 'FECHA FACTURA']];
+    results
+        .filter(r => {
+            const d = parseInt(r.DEMORA) || 0;
+            const est = r.ESTATUS_FINAL || '';
+            return d > 7 && !est.includes('\u2705') && !est.includes('\ud83d\ude9a') && !est.includes('Legalizado');
+        })
+        .sort((a, b) => (b.DEMORA || 0) - (a.DEMORA || 0))
+        .forEach(r => {
+            const fFac = r.FECHA_FACTURA instanceof Date ? r.FECHA_FACTURA.toLocaleDateString() : (r.FECHA_FACTURA || '-');
+            riesgoRows.push([
+                r.PEDIDO_RAW || r.PEDIDO,
+                r.CLIENTE || r.CONSIGNATARIO || '-',
+                resolveAnalystName(r.RESPONSABLE || '-'),
+                r.DEMORA || 0,
+                r.ESTATUS_FINAL,
+                fFac
+            ]);
+        });
+    const wsRiesgo = XLSX.utils.aoa_to_sheet(riesgoRows);
+    wsRiesgo['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 22 }, { wch: 14 }, { wch: 24 }, { wch: 14 }];
+    XLSX.utils.book_append_sheet(wb, wsRiesgo, 'Detalle Riesgo');
+
+    const fileName = `KPI_ExportDesk_${mod}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(wb, fileName);
 }
 

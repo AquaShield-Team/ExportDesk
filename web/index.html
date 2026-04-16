@@ -183,6 +183,43 @@
                     </div>
                 </div>
 
+                <!-- Widget: Panel KPI -->
+                <div class="widget-card glass kpi-panel-widget" id="kpi-panel-widget" style="display:none;">
+                    <div class="widget-header" style="flex-wrap:wrap; gap:8px;">
+                        <h3><i data-lucide="activity"></i> Panel KPI</h3>
+                        <button class="secondary-btn kpi-download-btn" onclick="exportKPIExcel()" title="Descargar KPIs a Excel">
+                            <i data-lucide="download"></i> KPI Excel
+                        </button>
+                    </div>
+                    <div class="kpi-cards-grid" id="kpi-cards-grid">
+                        <div class="kpi-card" id="kpi-demora">
+                            <div class="kpi-label">Demora Prom.</div>
+                            <div class="kpi-value" id="kpi-demora-val">—</div>
+                            <div class="kpi-sub" id="kpi-demora-sub">días</div>
+                        </div>
+                        <div class="kpi-card" id="kpi-sla">
+                            <div class="kpi-label">SLA (≤3 días)</div>
+                            <div class="kpi-value" id="kpi-sla-val">—</div>
+                            <div class="kpi-sub" id="kpi-sla-sub">dentro de plazo</div>
+                        </div>
+                        <div class="kpi-card" id="kpi-riesgo">
+                            <div class="kpi-label">En Riesgo</div>
+                            <div class="kpi-value" id="kpi-riesgo-val">—</div>
+                            <div class="kpi-sub" id="kpi-riesgo-sub">&gt;7 días</div>
+                        </div>
+                        <div class="kpi-card" id="kpi-criticos">
+                            <div class="kpi-label">Críticos</div>
+                            <div class="kpi-value" id="kpi-criticos-val">—</div>
+                            <div class="kpi-sub" id="kpi-criticos-sub">&gt;14 días</div>
+                        </div>
+                        <div class="kpi-card" id="kpi-tgestion">
+                            <div class="kpi-label">T. Gestión Prom.</div>
+                            <div class="kpi-value" id="kpi-tgestion-val">—</div>
+                            <div class="kpi-sub" id="kpi-tgestion-sub">Factura → BL</div>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="widget-card glass chart-widget">
                     <div class="widget-header">
                         <h3><i data-lucide="pie-chart"></i> Cumplimiento Global</h3>

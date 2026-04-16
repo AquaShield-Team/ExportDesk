@@ -1917,7 +1917,8 @@ function procesarDUS() {
             FECHA_FACTURA:       fechaFacturaStr,
             FECHA_FACTURA_DATE:  fechaFacturaDate,
             FACTURA_SAP:         facturaEncontrada,
-            METODO_CRUCE:        metodoCruce
+            METODO_CRUCE:        metodoCruce,
+            DEMORA:              fechaFacturaDate ? Math.max(0, Math.floor((state.fechaHoy - fechaFacturaDate) / (1000 * 60 * 60 * 24))) : 0
         };
     });
 }
@@ -3258,7 +3259,7 @@ function renderKPIPanel(results) {
     if (window.lucide) lucide.createIcons();
 }
 
-/** Exporta KPIs a Excel multi-hoja */
+/** Exporta KPIs a Excel multi-hoja CON COLORES (xlsx-js-style) */
 function exportKPIExcel() {
     const results = state.currentModule === 'dus' ? state.dusResults : state.results;
     const kpis = calculateKPIs(results);
@@ -3268,37 +3269,80 @@ function exportKPIExcel() {
     const hoy = new Date().toLocaleDateString('es-CL');
     const mod = state.currentModule === 'dus' ? 'DUS' : 'Auditoría';
 
-    // === Hoja 1: Resumen ===
+    // ═══ Estilos reutilizables ═══
+    const sHeader = { font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 }, fill: { fgColor: { rgb: '1e293b' } }, alignment: { horizontal: 'center' } };
+    const sTitle  = { font: { bold: true, sz: 14, color: { rgb: '0ea5e9' } } };
+    const sGreen  = { fill: { fgColor: { rgb: 'dcfce7' } }, font: { color: { rgb: '166534' }, bold: true } };
+    const sYellow = { fill: { fgColor: { rgb: 'fef9c3' } }, font: { color: { rgb: '854d0e' }, bold: true } };
+    const sRed    = { fill: { fgColor: { rgb: 'fee2e2' } }, font: { color: { rgb: '991b1b' }, bold: true } };
+    const sCrit   = { fill: { fgColor: { rgb: 'fecaca' } }, font: { color: { rgb: '7f1d1d' }, bold: true } };
+    const sNeutral= { fill: { fgColor: { rgb: 'f1f5f9' } }, font: { color: { rgb: '475569' } } };
+
+    function colorForEstado(text) {
+        if (text.includes('Verde')) return sGreen;
+        if (text.includes('Naranja')) return sYellow;
+        if (text.includes('Rojo')) return sRed;
+        if (text.includes('Crítico')) return sCrit;
+        return sNeutral;
+    }
+
+    function styleHeaders(ws, cols) {
+        for (let c = 0; c < cols; c++) {
+            const addr = XLSX.utils.encode_cell({ r: 0, c });
+            if (ws[addr]) ws[addr].s = sHeader;
+        }
+    }
+
+    function styleCumplCol(ws, rows, colIdx) {
+        for (let r = 1; r <= rows; r++) {
+            const addr = XLSX.utils.encode_cell({ r, c: colIdx });
+            if (!ws[addr]) continue;
+            const val = parseInt(String(ws[addr].v)) || 0;
+            ws[addr].s = val >= 85 ? sGreen : val >= 60 ? sYellow : sRed;
+        }
+    }
+
+    // ═══ Hoja 1: Resumen ═══
+    const estadoDemora = kpis.demoraPromedio <= 3 ? '🟢 Verde' : kpis.demoraPromedio <= 7 ? '🟠 Naranja' : '🔴 Rojo';
+    const estadoSLA    = kpis.slaPct >= 85 ? '🟢 Verde' : kpis.slaPct >= 60 ? '🟠 Naranja' : '🔴 Rojo';
+    const estadoRiesgo = kpis.enRiesgo === 0 ? '🟢 Verde' : '🔴 Rojo';
+    const estadoCrit   = kpis.criticos === 0 ? '🟢 Verde' : '💀 Crítico';
+    const estadoTG     = kpis.tGestionProm !== null ? (kpis.tGestionProm <= 5 ? '🟢 Verde' : '🟠 Naranja') : '⚪ N/A';
+
     const resumen = [
         ['PANEL KPI — ExportDesk', '', '', hoy],
         ['Módulo:', mod],
         [],
         ['INDICADOR', 'VALOR', 'ESTADO', 'DESCRIPCIÓN'],
-        ['Demora Promedio', kpis.demoraPromedio.toFixed(1) + ' días',
-            kpis.demoraPromedio <= 3 ? '🟢 Verde' : kpis.demoraPromedio <= 7 ? '🟠 Naranja' : '🔴 Rojo',
-            'Promedio de días de demora de todos los pedidos'],
-        ['SLA (≤3 días)', kpis.slaPct + '%',
-            kpis.slaPct >= 85 ? '🟢 Verde' : kpis.slaPct >= 60 ? '🟠 Naranja' : '🔴 Rojo',
-            kpis.dentroPlazo + ' de ' + kpis.totalProcesados + ' procesados dentro de plazo'],
-        ['En Riesgo (>7d)', kpis.enRiesgo,
-            kpis.enRiesgo === 0 ? '🟢 Verde' : '🔴 Rojo',
-            'Pedidos pendientes con más de 7 días de demora'],
-        ['Críticos (>14d)', kpis.criticos,
-            kpis.criticos === 0 ? '🟢 Verde' : '💀 Crítico',
-            'Pedidos pendientes con más de 14 días — requieren acción inmediata'],
-        ['T. Gestión Prom.', kpis.tGestionProm !== null ? kpis.tGestionProm.toFixed(1) + ' días' : 'N/A',
-            kpis.tGestionProm !== null ? (kpis.tGestionProm <= 5 ? '🟢 Verde' : '🟠 Naranja') : '⚪ N/A',
-            'Promedio de días entre factura y BL'],
+        ['Demora Promedio', kpis.demoraPromedio.toFixed(1) + ' días', estadoDemora, 'Promedio de días de demora de pedidos pendientes'],
+        ['SLA (≤3 días)', kpis.slaPct + '%', estadoSLA, kpis.dentroPlazo + ' de ' + kpis.totalProcesados + ' procesados dentro de plazo'],
+        ['En Riesgo (>7d)', kpis.enRiesgo, estadoRiesgo, 'Pedidos pendientes con más de 7 días de demora'],
+        ['Críticos (>14d)', kpis.criticos, estadoCrit, 'Pedidos pendientes con más de 14 días — requieren acción inmediata'],
+        ['T. Gestión Prom.', kpis.tGestionProm !== null ? kpis.tGestionProm.toFixed(1) + ' días' : 'N/A', estadoTG, 'Promedio de días entre factura y BL'],
         [],
         ['Total Pedidos', kpis.total],
         ['Total Procesados', kpis.totalProcesados],
+        ['Total Pendientes', kpis.totalPendientes],
         ['% Cumplimiento', kpis.total > 0 ? Math.round((kpis.totalProcesados / kpis.total) * 100) + '%' : '0%'],
     ];
     const wsResumen = XLSX.utils.aoa_to_sheet(resumen);
-    wsResumen['!cols'] = [{ wch: 22 }, { wch: 15 }, { wch: 14 }, { wch: 50 }];
+    wsResumen['!cols'] = [{ wch: 22 }, { wch: 15 }, { wch: 14 }, { wch: 55 }];
+    // Estilo título
+    if (wsResumen['A1']) wsResumen['A1'].s = sTitle;
+    // Estilo headers fila 4 (index 3)
+    for (let c = 0; c < 4; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 3, c });
+        if (wsResumen[addr]) wsResumen[addr].s = sHeader;
+    }
+    // Colorear columna ESTADO (C5:C9)
+    const estadoMap = [estadoDemora, estadoSLA, estadoRiesgo, estadoCrit, estadoTG];
+    estadoMap.forEach((txt, i) => {
+        const addr = XLSX.utils.encode_cell({ r: 4 + i, c: 2 });
+        if (wsResumen[addr]) wsResumen[addr].s = colorForEstado(txt);
+    });
     XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
 
-    // === Hoja 2: Por Analista ===
+    // ═══ Hoja 2: Por Analista ═══
     const analRows = [['ANALISTA', 'CÓDIGO', 'GRUPO', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d', 'T. GESTIÓN PROM.']];
     Object.entries(kpis.porAnalista)
         .sort((a, b) => b[1].total - a[1].total)
@@ -3313,9 +3357,11 @@ function exportKPIExcel() {
         });
     const wsAnal = XLSX.utils.aoa_to_sheet(analRows);
     wsAnal['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
+    styleHeaders(wsAnal, 9);
+    styleCumplCol(wsAnal, analRows.length - 1, 5); // Col F = % CUMPL.
     XLSX.utils.book_append_sheet(wb, wsAnal, 'Por Analista');
 
-    // === Hoja 3: Por Mes ===
+    // ═══ Hoja 3: Por Mes ═══
     const mesRows = [['MES', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d']];
     Object.entries(kpis.porMes)
         .sort((a, b) => a[0].localeCompare(b[0]))
@@ -3327,9 +3373,11 @@ function exportKPIExcel() {
         });
     const wsMes = XLSX.utils.aoa_to_sheet(mesRows);
     wsMes['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }];
+    styleHeaders(wsMes, 6);
+    styleCumplCol(wsMes, mesRows.length - 1, 3); // Col D = % CUMPL.
     XLSX.utils.book_append_sheet(wb, wsMes, 'Por Mes');
 
-    // === Hoja 4: Por Cliente ===
+    // ═══ Hoja 4: Por Cliente ═══
     const cliRows = [['CLIENTE', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.']];
     Object.entries(kpis.porCliente)
         .sort((a, b) => b[1].total - a[1].total)
@@ -3341,30 +3389,40 @@ function exportKPIExcel() {
         });
     const wsCli = XLSX.utils.aoa_to_sheet(cliRows);
     wsCli['!cols'] = [{ wch: 30 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }];
+    styleHeaders(wsCli, 5);
+    styleCumplCol(wsCli, cliRows.length - 1, 3); // Col D = % CUMPL.
     XLSX.utils.book_append_sheet(wb, wsCli, 'Por Cliente');
 
-    // === Hoja 5: Detalle Riesgo (>7 días, no procesados) ===
+    // ═══ Hoja 5: Detalle Riesgo (>7 días, no gestionados) ═══
     const riesgoRows = [['PEDIDO', 'CLIENTE/CONSIG.', 'RESPONSABLE', 'DEMORA (DÍAS)', 'ESTADO', 'FECHA FACTURA']];
-    results
+    const riesgoData = results
         .filter(r => {
             const d = parseInt(r.DEMORA) || 0;
             const est = r.ESTATUS_FINAL || '';
             return d > 7 && !isGestionado(est);
         })
-        .sort((a, b) => (b.DEMORA || 0) - (a.DEMORA || 0))
-        .forEach(r => {
-            const fFac = r.FECHA_FACTURA instanceof Date ? r.FECHA_FACTURA.toLocaleDateString() : (r.FECHA_FACTURA || '-');
-            riesgoRows.push([
-                r.PEDIDO_RAW || r.PEDIDO,
-                r.CLIENTE || r.CONSIGNATARIO || '-',
-                resolveAnalystName(r.RESPONSABLE || '-'),
-                r.DEMORA || 0,
-                r.ESTATUS_FINAL,
-                fFac
-            ]);
-        });
+        .sort((a, b) => (b.DEMORA || 0) - (a.DEMORA || 0));
+    riesgoData.forEach(r => {
+        const fFac = r.FECHA_FACTURA instanceof Date ? r.FECHA_FACTURA.toLocaleDateString() : (r.FECHA_FACTURA || '-');
+        riesgoRows.push([
+            r.PEDIDO_RAW || r.PEDIDO,
+            r.CLIENTE || r.CONSIGNATARIO || '-',
+            resolveAnalystName(r.RESPONSABLE || '-'),
+            r.DEMORA || 0,
+            r.ESTATUS_FINAL,
+            fFac
+        ]);
+    });
     const wsRiesgo = XLSX.utils.aoa_to_sheet(riesgoRows);
     wsRiesgo['!cols'] = [{ wch: 16 }, { wch: 28 }, { wch: 22 }, { wch: 14 }, { wch: 24 }, { wch: 14 }];
+    styleHeaders(wsRiesgo, 6);
+    // Colorear demora: >14d rojo, >7d naranja
+    for (let r = 1; r <= riesgoData.length; r++) {
+        const addr = XLSX.utils.encode_cell({ r, c: 3 }); // Col D = DEMORA
+        if (!wsRiesgo[addr]) continue;
+        const d = parseInt(wsRiesgo[addr].v) || 0;
+        wsRiesgo[addr].s = d > 14 ? sRed : sYellow;
+    }
     XLSX.utils.book_append_sheet(wb, wsRiesgo, 'Detalle Riesgo');
 
     const fileName = `KPI_ExportDesk_${mod}_${new Date().toISOString().slice(0, 10)}.xlsx`;

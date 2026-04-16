@@ -569,7 +569,13 @@ function runAudit() {
             const manualMap = new Map();
             procesados.forEach(row => {
                 const key = cleanPedido(row['PEDIDO FLUJO']);
-                if (key) manualMap.set(key, row.MOTIVO || "Validado sin motivo");
+                // Buscar motivo en múltiples nombres de columna posibles
+                const motivo = row.MOTIVO || row.Motivo || row.OBSERVACION || row.Observacion
+                    || row.OBSERVACIONES || row.Observaciones
+                    || row.NOTA || row.Nota || row.COMENTARIO || row.Comentario
+                    || row['DESCRIPCION'] || row['Descripcion']
+                    || "Validado sin motivo";
+                if (key) manualMap.set(key, motivo);
             });
 
             const asignacionMap = new Map();
@@ -721,7 +727,7 @@ function runAudit() {
                     RESPONSABLE: responsable,
                     FECHA_FACTURA: fechaFactura && !isNaN(fechaFactura) ? fechaFactura : null,
                     FECHA_BL: fechaBL,
-                    MOTIVO: motivoManual || "",
+                    MOTIVO: estatus === '⚠️ Validado Manualmente' ? (motivoManual || '') : '',
                     BL: blMatch ? blMatch.BL : ""
                 });
             });

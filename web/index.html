@@ -261,35 +261,6 @@
                     </button>
                 </div>
 
-                <!-- Widget: DUS Observaciones (colapsable) -->
-                <div class="widget-card glass obs-widget" id="dus-obs-widget" style="display:none;">
-                    <div class="widget-header obs-collapse-trigger" onclick="toggleObsWidget()" style="margin-bottom:0; cursor:pointer; user-select:none;">
-                        <h3><i data-lucide="clipboard-list"></i> DUS Observaciones</h3>
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <span id="obs-count-badge" class="obs-count-badge"></span>
-                            <i data-lucide="chevron-down" id="obs-chevron" class="obs-chevron"></i>
-                        </div>
-                    </div>
-                    <div id="obs-collapsible-body" class="obs-collapsible-body">
-                    <!-- Dropzone -->
-                    <div class="obs-dropzone" id="obs-dropzone">
-                        <i data-lucide="upload-cloud"></i>
-                        <span>Arrastra aquí el reporte DUS</span>
-                        <small>Debe tener columna “Observaciones”</small>
-                        <input type="file" id="obs-file-input" accept=".xlsx,.xls" style="display:none;">
-                    </div>
-                    <!-- Lista de observaciones cargadas -->
-                    <div id="obs-list-container" style="display:none; margin-top:10px;">
-                        <div id="obs-list"></div>
-                    </div>
-                    <!-- Agregar observación manual -->
-                    <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
-                        <input type="text" id="obs-input-pedido" class="glass-input obs-input" placeholder="N° Pedido">
-                        <input type="text" id="obs-input-nota"   class="glass-input obs-input" placeholder="Observación..." style="flex:1;">
-                        <button class="secondary-btn" onclick="addObsManual()" title="Agregar"><i data-lucide="plus"></i></button>
-                    </div>
-                    </div> <!-- /obs-collapsible-body -->
-                </div>
 
             </div>
 
@@ -426,6 +397,33 @@
                         </thead>
                         <tbody></tbody>
                     </table>
+                </div>
+
+                <!-- Widget: DUS Observaciones (colapsable, dentro de results) -->
+                <div class="widget-card glass obs-widget" id="dus-obs-widget" style="display:none; margin-top:16px;">
+                    <div class="widget-header obs-collapse-trigger" onclick="toggleObsWidget()" style="margin-bottom:0; cursor:pointer; user-select:none;">
+                        <h3><i data-lucide="clipboard-list"></i> DUS Observaciones</h3>
+                        <div style="display:flex; align-items:center; gap:8px;">
+                            <span id="obs-count-badge" class="obs-count-badge"></span>
+                            <i data-lucide="chevron-down" id="obs-chevron" class="obs-chevron"></i>
+                        </div>
+                    </div>
+                    <div id="obs-collapsible-body" class="obs-collapsible-body">
+                        <div class="obs-dropzone" id="obs-dropzone" style="margin-top:10px;">
+                            <i data-lucide="upload-cloud"></i>
+                            <span>Arrastra aquí el reporte DUS</span>
+                            <small>Debe tener columna “Observaciones”</small>
+                            <input type="file" id="obs-file-input" accept=".xlsx,.xls" style="display:none;">
+                        </div>
+                        <div id="obs-list-container" style="display:none; margin-top:10px;">
+                            <div id="obs-list"></div>
+                        </div>
+                        <div style="display:flex; gap:6px; margin-top:10px; flex-wrap:wrap;">
+                            <input type="text" id="obs-input-pedido" class="glass-input obs-input" placeholder="N° Pedido">
+                            <input type="text" id="obs-input-nota" class="glass-input obs-input" placeholder="Observación..." style="flex:1;">
+                            <button class="secondary-btn" onclick="addObsManual()" title="Agregar"><i data-lucide="plus"></i></button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </section>

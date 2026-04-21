@@ -438,6 +438,8 @@ function identifyExcel(data, filename = "") {
             if (hasMatch('estado dus') || hasMatch('aprob.dus')) return 'dus';
             if (hasMatch('analista asignado') || (hasMatch('cliente') && hasMatch('responsable'))) return 'maestro';
             if (hasMatch('factura') && hasMatch('creado por')) return 'analistas';
+            if (hasMatch('número solicitante') && hasMatch('centro')) return 'analistas';
+            if (hasMatch('numero solicitante') && hasMatch('centro')) return 'analistas';
             if ((hasMatch('estado auditoría') && hasMatch('motivo')) || (hasMatch('pedido flujo') && hasMatch('motivo'))) return 'procesados';
             if (hasMatch('bl') || hasMatch('bill') || hasMatch('lading') || hasMatch('pedido')) return 'bl';
         }
@@ -598,10 +600,10 @@ function runAudit() {
 
             if (state.maestros.analistas) {
                 state.maestros.analistas.forEach(row => {
-                    const factura = row['N° Factura'] || row['Factura'] || row['Folio'];
+                    const factura = row['N° Factura'] || row['Factura'] || row['Folio'] || row['Número Solicitante'] || row['Numero Solicitante'];
                     const pedido = row['N° Pedido'] || row['N Pedido'] || row['Pedido'] || row['Orden'];
-                    const creador = row['Creado por'] || row['Analista'] || row['Nombre de usuario'];
-                    const userId = row['Usuario'] || row['SAP User'];
+                    const creador = row['Creado por'] || row['Analista'] || row['Nombre de usuario'] || row['Centro'];
+                    const userId = row['Usuario'] || row['SAP User'] || row['Centro'];
 
                     // P-01: guard de llave vacía en Maps de analistas
                     const facKey = cleanPedido(factura);

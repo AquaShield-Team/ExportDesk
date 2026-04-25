@@ -1915,14 +1915,21 @@ function procesarDUS() {
         }
 
         // --- Sub-estatus SLA: refinar Legalizado/Pendiente con deadline ---
+        // Para Legalizados: solo sub-clasificar desde Abril 2026 en adelante
+        // (no tenemos fecha exacta de legalización, así que los históricos quedarían inflados)
+        // Para Pendientes: siempre aplicar porque la deuda es real
         const deadlineDate = fechaFacturaDate ? calcularDeadlineDUS(fechaFacturaDate) : null;
-        if (deadlineDate && estatusFinal === '✅ Legalizado') {
+        const corteAbril = new Date(2026, 3, 1); // 1 Abril 2026
+        const esFacturaReciente = fechaFacturaDate && fechaFacturaDate >= corteAbril;
+
+        if (deadlineDate && estatusFinal === '✅ Legalizado' && esFacturaReciente) {
             if (state.fechaHoy > deadlineDate) {
                 estatusFinal = '⚠️ Legalizado Fuera de Plazo';
             } else {
                 estatusFinal = '✅ Legalizado (A Tiempo)';
             }
         } else if (deadlineDate && estatusFinal === '❌ Pendiente Legalización') {
+            // Pendientes: siempre evaluar deadline sin importar el mes
             if (state.fechaHoy > deadlineDate) {
                 estatusFinal = '🔴 Pendiente (Fuera de Plazo)';
             } else {

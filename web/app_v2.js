@@ -1876,6 +1876,22 @@ function procesarDUS() {
             estatusFinal = '❌ Pendiente Legalización';
         }
 
+        // --- Sub-estatus SLA: refinar Legalizado/Pendiente con deadline ---
+        const deadlineDate = fechaFacturaDate ? calcularDeadlineDUS(fechaFacturaDate) : null;
+        if (deadlineDate && estatusFinal === '✅ Legalizado') {
+            if (state.fechaHoy > deadlineDate) {
+                estatusFinal = '⚠️ Legalizado Fuera de Plazo';
+            } else {
+                estatusFinal = '✅ Legalizado (A Tiempo)';
+            }
+        } else if (deadlineDate && estatusFinal === '❌ Pendiente Legalización') {
+            if (state.fechaHoy > deadlineDate) {
+                estatusFinal = '🔴 Pendiente (Fuera de Plazo)';
+            } else {
+                estatusFinal = '🔵 Pendiente (En Plazo)';
+            }
+        }
+
         // Extraer todos los números que parecen pedidos (7-10 dígitos)
         const pedidoCandidates = rawReferencia.match(/\d{7,10}/g) || [];
         const pedidoClean = pedidoCandidates[0] || rawReferencia;
@@ -2018,10 +2034,14 @@ function renderDUS(selected = []) {
 /** Clasifica ESTADO GENERAL para el módulo DUS */
 function getDUSEstadoGeneral(estatusFinal) {
     const s = String(estatusFinal || '');
-    if (s.includes('✅'))    return { label: '✅ Legalizado',  badgeClass: 'badge-green' };
-    if (s.includes('⚠️'))   return { label: '⚠️ Sin Zarpe', badgeClass: 'badge-yellow' };
-    if (s.includes('Anulado')) return { label: '❌ Anulado',    badgeClass: 'badge-critical' };
-    return                           { label: '❌ Pendiente',   badgeClass: 'badge-red' };
+    if (s.includes('Legalizado') && s.includes('A Tiempo'))       return { label: '✅ Legalizado (A Tiempo)',       badgeClass: 'badge-green' };
+    if (s.includes('Legalizado') && s.includes('Fuera de Plazo')) return { label: '⚠️ Legalizado Fuera de Plazo',   badgeClass: 'badge-orange' };
+    if (s.includes('✅') || s.includes('Legalizado'))              return { label: '✅ Legalizado',                   badgeClass: 'badge-green' };
+    if (s.includes('Pendiente') && s.includes('Fuera de Plazo'))  return { label: '🔴 Pendiente (Fuera de Plazo)',   badgeClass: 'badge-critical' };
+    if (s.includes('Pendiente') && s.includes('En Plazo'))        return { label: '🔵 Pendiente (En Plazo)',         badgeClass: 'badge-blue' };
+    if (s.includes('Sin Zarpe'))                                  return { label: '⚠️ Sin Zarpe',                    badgeClass: 'badge-yellow' };
+    if (s.includes('Anulado'))                                    return { label: '❌ Anulado',                      badgeClass: 'badge-critical' };
+    return                                                               { label: '❌ Pendiente',                     badgeClass: 'badge-red' };
 }
 
 // updateChartForDUS movido arriba junto con las funciones Plotly (ver sección PLOTLY.JS)
@@ -3120,7 +3140,7 @@ function toggleObsWidget() {
 /** Helper global: detecta si un ESTATUS_FINAL ya está "gestionado"
  *  (procesado, terrestre, legalizado, o validado manualmente) */
 function isGestionado(est) {
-    return est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado') || est.includes('Validado Manualmente');
+    return est.includes('Legalizado') || est.includes('✅') || est.includes('🚚') || est.includes('Terrestre') || est.includes('Validado Manualmente');
 }
 
 /** Calcula el deadline DUS: día 8 del mes siguiente a la fecha de factura */
@@ -3419,25 +3439,26 @@ function exportKPIExcel() {
     }
 
     // ═══ Hoja 1: Resumen ═══
+    const isDUSExport = state.currentModule === 'dus';
     const estadoDemora = kpis.demoraPromedio <= 3 ? '🟢 Verde' : kpis.demoraPromedio <= 7 ? '🟠 Naranja' : '🔴 Rojo';
     const estadoSLA    = kpis.slaPct >= 85 ? '🟢 Verde' : kpis.slaPct >= 60 ? '🟠 Naranja' : '🔴 Rojo';
-    const estadoRiesgo = kpis.enRiesgo === 0 ? '🟢 Verde' : '🔴 Rojo';
+    const estadoRiesgo = isDUSExport ? (kpis.fueraSLA === 0 ? '🟢 Verde' : '🔴 Rojo') : (kpis.enRiesgo === 0 ? '🟢 Verde' : '🔴 Rojo');
     const estadoCrit   = kpis.criticos === 0 ? '🟢 Verde' : '💀 Crítico';
-    const estadoTG     = kpis.tGestionProm !== null ? (kpis.tGestionProm <= 5 ? '🟢 Verde' : '🟠 Naranja') : '⚪ N/A';
+    const estadoTG     = kpis.tGestionProm !== null ? (isDUSExport ? (kpis.tGestionProm <= 20 ? '🟢 Verde' : kpis.tGestionProm <= 35 ? '🟠 Naranja' : '🔴 Rojo') : (kpis.tGestionProm <= 5 ? '🟢 Verde' : '🟠 Naranja')) : '⚪ N/A';
 
     const resumen = [
         ['PANEL KPI — ExportDesk', '', '', hoy],
         ['Módulo:', mod],
         [],
         ['INDICADOR', 'VALOR', 'ESTADO', 'DESCRIPCIÓN'],
-        ['Demora Promedio', kpis.demoraPromedio.toFixed(1) + ' días', estadoDemora, 'Promedio de días de demora de pedidos pendientes'],
-        ['SLA (≤3 días)', kpis.slaPct + '%', estadoSLA, kpis.dentroPlazo + ' de ' + kpis.totalProcesados + ' procesados dentro de plazo'],
-        ['En Riesgo (>7d)', kpis.enRiesgo, estadoRiesgo, 'Pedidos pendientes con más de 7 días de demora'],
+        ['Demora Promedio', kpis.demoraPromedio.toFixed(1) + ' días', estadoDemora, 'Promedio días demora pedidos pendientes'],
+        [isDUSExport ? 'SLA (≤8 día sig.)' : 'SLA (≤3 días)', kpis.slaPct + '%', estadoSLA, kpis.dentroPlazo + ' de ' + kpis.totalProcesados + (isDUSExport ? ' legalizados a tiempo' : ' procesados dentro de plazo')],
+        [isDUSExport ? 'Fuera de SLA' : 'En Riesgo (>7d)', isDUSExport ? kpis.fueraSLA : kpis.enRiesgo, estadoRiesgo, isDUSExport ? 'Pendientes cuyo deadline (día 8 mes sig.) ya venció' : 'Pedidos pendientes con más de 7 días de demora'],
         ['Críticos (>14d)', kpis.criticos, estadoCrit, 'Pedidos pendientes con más de 14 días — requieren acción inmediata'],
-        ['T. Gestión Prom.', kpis.tGestionProm !== null ? kpis.tGestionProm.toFixed(1) + ' días' : 'N/A', estadoTG, 'Promedio de días entre factura y BL'],
+        [isDUSExport ? 'T. Total Prom.' : 'T. Gestión Prom.', kpis.tGestionProm !== null ? kpis.tGestionProm.toFixed(1) + ' días' : 'N/A', estadoTG, isDUSExport ? 'Promedio días desde factura hasta hoy (todos)' : 'Promedio de días entre factura y BL'],
         [],
         ['Total Pedidos', kpis.total],
-        ['Total Procesados', kpis.totalProcesados],
+        [isDUSExport ? 'Total Legalizados' : 'Total Procesados', kpis.totalProcesados],
         ['Total Pendientes', kpis.totalPendientes],
         ['% Cumplimiento', kpis.total > 0 ? Math.round((kpis.totalProcesados / kpis.total) * 100) + '%' : '0%'],
     ];
@@ -3459,41 +3480,94 @@ function exportKPIExcel() {
     XLSX.utils.book_append_sheet(wb, wsResumen, 'Resumen');
 
     // ═══ Hoja 2: Por Analista ═══
-    const analRows = [['ANALISTA', 'CÓDIGO', 'GRUPO', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d', 'T. GESTIÓN PROM.']];
+    const analHeaders = isDUSExport
+        ? ['ANALISTA', 'CÓDIGO', 'GRUPO', 'TOTAL', 'LEGALIZADOS', 'A TIEMPO', 'FUERA PLAZO', 'PEND. FUERA SLA', '% SLA', 'DEMORA PROM.']
+        : ['ANALISTA', 'CÓDIGO', 'GRUPO', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d', 'T. GESTIÓN PROM.'];
+    const analRows = [analHeaders];
     Object.entries(kpis.porAnalista)
         .sort((a, b) => b[1].total - a[1].total)
         .forEach(([code, data]) => {
             const name = resolveAnalystName(code);
             const grupo = resolveAnalystGrupo(code) || 'Sin grupo';
-            const cumpl = data.total > 0 ? Math.round((data.proc / data.total) * 100) : 0;
-            const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
-            const sla = data.demoras.length > 0 ? Math.round((data.demoras.filter(d => d <= 3).length / data.demoras.length) * 100) + '%' : '-';
-            const tg = data.tgestiones.length > 0 ? (data.tgestiones.reduce((a, b) => a + b, 0) / data.tgestiones.length).toFixed(1) : '-';
-            analRows.push([name, code, grupo, data.total, data.proc, cumpl + '%', demProm, sla, tg]);
+            if (isDUSExport) {
+                // Contar sub-estatus por analista desde los results
+                let aTiempo = 0, fueraPlazo = 0;
+                results.filter(r => (r.RESPONSABLE || 'Sin Asignar') === code).forEach(r => {
+                    const est = r.ESTATUS_FINAL || '';
+                    if (est.includes('Legalizado') && est.includes('A Tiempo')) aTiempo++;
+                    else if (est.includes('Legalizado') && est.includes('Fuera de Plazo')) fueraPlazo++;
+                });
+                const slaPct = (aTiempo + fueraPlazo) > 0 ? Math.round((aTiempo / (aTiempo + fueraPlazo)) * 100) : 0;
+                const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
+                analRows.push([name, code, grupo, data.total, data.proc, aTiempo, fueraPlazo, data.fueraSLA || 0, slaPct + '%', demProm]);
+            } else {
+                const cumpl = data.total > 0 ? Math.round((data.proc / data.total) * 100) : 0;
+                const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
+                const sla = data.demoras.length > 0 ? Math.round((data.demoras.filter(d => d <= 3).length / data.demoras.length) * 100) + '%' : '-';
+                const tg = data.tgestiones.length > 0 ? (data.tgestiones.reduce((a, b) => a + b, 0) / data.tgestiones.length).toFixed(1) : '-';
+                analRows.push([name, code, grupo, data.total, data.proc, cumpl + '%', demProm, sla, tg]);
+            }
         });
     const wsAnal = XLSX.utils.aoa_to_sheet(analRows);
-    wsAnal['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
-    styleHeaders(wsAnal, 9);
-    styleCumplCol(wsAnal, analRows.length - 1, 5); // Col F = % CUMPL.
-    styleDemoraCol(wsAnal, analRows.length - 1, 6); // Col G = DEMORA PROM.
+    wsAnal['!cols'] = isDUSExport
+        ? [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 14 }]
+        : [{ wch: 22 }, { wch: 14 }, { wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
+    styleHeaders(wsAnal, analHeaders.length);
+    if (isDUSExport) {
+        styleCumplCol(wsAnal, analRows.length - 1, 8); // % SLA
+        styleDemoraCol(wsAnal, analRows.length - 1, 9); // DEMORA PROM.
+    } else {
+        styleCumplCol(wsAnal, analRows.length - 1, 5);
+        styleDemoraCol(wsAnal, analRows.length - 1, 6);
+    }
     XLSX.utils.book_append_sheet(wb, wsAnal, 'Por Analista');
 
-    // ═══ Hoja 3: Por Mes ═══
-    const mesRows = [['MES', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d']];
+    // ═══ Hoja 3: Por Mes / Período ═══
+    const mesHeaders = isDUSExport
+        ? ['PERÍODO', 'DEADLINE', 'TOTAL', 'LEGALIZADOS', 'A TIEMPO', 'FUERA PLAZO', 'PEND. FUERA SLA', '% SLA', 'DEMORA PROM.']
+        : ['MES', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.', 'SLA ≤3d'];
+    const mesRows = [mesHeaders];
     Object.entries(kpis.porMes)
         .sort((a, b) => a[0].localeCompare(b[0]))
         .forEach(([mes, data]) => {
-            const cumpl = data.total > 0 ? Math.round((data.proc / data.total) * 100) : 0;
-            const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
-            const sla = data.demoras.length > 0 ? Math.round((data.demoras.filter(d => d <= 3).length / data.demoras.length) * 100) + '%' : '-';
-            mesRows.push([mes, data.total, data.proc, cumpl + '%', demProm, sla]);
+            if (isDUSExport) {
+                // Calcular deadline del período
+                const [y, m] = mes !== 'Sin Fecha' ? mes.split('-').map(Number) : [0, 0];
+                const dl = y > 0 ? new Date(y, m, 8).toLocaleDateString('es-CL') : '-';
+                const periodoLabel = y > 0 ? `${mes}` : 'Sin Fecha';
+                let aTiempo = 0, fueraPlazo = 0;
+                results.filter(r => {
+                    const fd = r.FECHA_FACTURA_DATE;
+                    if (!fd || !(fd instanceof Date)) return mes === 'Sin Fecha';
+                    return fd.toISOString().slice(0, 7) === mes;
+                }).forEach(r => {
+                    const est = r.ESTATUS_FINAL || '';
+                    if (est.includes('Legalizado') && est.includes('A Tiempo')) aTiempo++;
+                    else if (est.includes('Legalizado') && est.includes('Fuera de Plazo')) fueraPlazo++;
+                });
+                const slaPct = (aTiempo + fueraPlazo) > 0 ? Math.round((aTiempo / (aTiempo + fueraPlazo)) * 100) : 0;
+                const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
+                mesRows.push([periodoLabel, dl, data.total, data.proc, aTiempo, fueraPlazo, data.fueraSLA || 0, slaPct + '%', demProm]);
+            } else {
+                const cumpl = data.total > 0 ? Math.round((data.proc / data.total) * 100) : 0;
+                const demProm = data.demoras.length > 0 ? (data.demoras.reduce((a, b) => a + b, 0) / data.demoras.length).toFixed(1) : '-';
+                const sla = data.demoras.length > 0 ? Math.round((data.demoras.filter(d => d <= 3).length / data.demoras.length) * 100) + '%' : '-';
+                mesRows.push([mes, data.total, data.proc, cumpl + '%', demProm, sla]);
+            }
         });
     const wsMes = XLSX.utils.aoa_to_sheet(mesRows);
-    wsMes['!cols'] = [{ wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }];
-    styleHeaders(wsMes, 6);
-    styleCumplCol(wsMes, mesRows.length - 1, 3); // Col D = % CUMPL.
-    styleDemoraCol(wsMes, mesRows.length - 1, 4); // Col E = DEMORA PROM.
-    XLSX.utils.book_append_sheet(wb, wsMes, 'Por Mes');
+    wsMes['!cols'] = isDUSExport
+        ? [{ wch: 12 }, { wch: 14 }, { wch: 8 }, { wch: 14 }, { wch: 12 }, { wch: 14 }, { wch: 16 }, { wch: 10 }, { wch: 14 }]
+        : [{ wch: 12 }, { wch: 8 }, { wch: 12 }, { wch: 10 }, { wch: 14 }, { wch: 10 }];
+    styleHeaders(wsMes, mesHeaders.length);
+    if (isDUSExport) {
+        styleCumplCol(wsMes, mesRows.length - 1, 7); // % SLA
+        styleDemoraCol(wsMes, mesRows.length - 1, 8); // DEMORA PROM.
+    } else {
+        styleCumplCol(wsMes, mesRows.length - 1, 3);
+        styleDemoraCol(wsMes, mesRows.length - 1, 4);
+    }
+    XLSX.utils.book_append_sheet(wb, wsMes, isDUSExport ? 'Por Período' : 'Por Mes');
 
     // ═══ Hoja 4: Por Cliente ═══
     const cliRows = [['CLIENTE', 'TOTAL', 'PROCESADOS', '% CUMPL.', 'DEMORA PROM.']];

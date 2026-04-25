@@ -1927,7 +1927,14 @@ function procesarDUS() {
             FECHA_FACTURA_DATE:  fechaFacturaDate,
             FACTURA_SAP:         facturaEncontrada,
             METODO_CRUCE:        metodoCruce,
-            DEMORA:              fechaFacturaDate ? Math.max(0, Math.floor((state.fechaHoy - fechaFacturaDate) / (1000 * 60 * 60 * 24))) : 0
+            DEMORA:              fechaFacturaDate ? Math.max(0, Math.floor((state.fechaHoy - fechaFacturaDate) / (1000 * 60 * 60 * 24))) : 0,
+            DEADLINE:            fechaFacturaDate ? calcularDeadlineDUS(fechaFacturaDate) : null,
+            DEMORA_SLA:          (function() {
+                if (!fechaFacturaDate) return 0;
+                const dl = calcularDeadlineDUS(fechaFacturaDate);
+                const ref = isGestionado(estatusFinal) ? state.fechaHoy : state.fechaHoy; // siempre vs hoy para pendientes
+                return Math.max(0, Math.floor((ref - dl) / (1000 * 60 * 60 * 24)));
+            })()
         };
     });
 }
@@ -2088,6 +2095,9 @@ function exportToExcel() {
                 'CONSIGNATARIO':  r.CONSIGNATARIO,
                 'RESPONSABLE':    r.RESPONSABLE,
                 'FECHA FACTURA':  (r.FECHA_FACTURA_DATE instanceof Date && !isNaN(r.FECHA_FACTURA_DATE)) ? r.FECHA_FACTURA_DATE : '',
+                'DEMORA (días)':  r.DEMORA || 0,
+                'DEADLINE':       r.DEADLINE instanceof Date ? r.DEADLINE : '',
+                'ATRASO SLA':     r.DEMORA_SLA || 0,
                 'OBSERVACIONES':  nota
             };
         });
@@ -3113,15 +3123,24 @@ function isGestionado(est) {
     return est.includes('\u2705') || est.includes('\ud83d\ude9a') || est.includes('Legalizado') || est.includes('Validado Manualmente');
 }
 
+/** Calcula el deadline DUS: día 8 del mes siguiente a la fecha de factura */
+function calcularDeadlineDUS(fechaFactura) {
+    if (!fechaFactura || !(fechaFactura instanceof Date) || isNaN(fechaFactura)) return null;
+    const y = fechaFactura.getFullYear();
+    const m = fechaFactura.getMonth(); // 0-based
+    // Mes siguiente, día 8, medianoche
+    return new Date(y, m + 1, 8, 0, 0, 0, 0);
+}
+
 /** Calcula todos los KPIs a partir de los resultados actuales */
 function calculateKPIs(results) {
     if (!results || results.length === 0) return null;
 
     const isDUS = state.currentModule === 'dus';
     const total = results.length;
+    const dayMs = 1000 * 60 * 60 * 24;
 
-    // --- Demoras (solo pedidos PENDIENTES — los gestionados inflan el promedio
-    //     porque su demora cuenta hasta hoy, no hasta cuando se proceso) ---
+    // --- Demoras (solo pedidos PENDIENTES) ---
     const demorasPendientes = results
         .filter(r => typeof r.DEMORA === 'number' && r.DEMORA > 0 && !isGestionado(r.ESTATUS_FINAL || ''))
         .map(r => r.DEMORA);
@@ -3130,13 +3149,40 @@ function calculateKPIs(results) {
         : 0;
     const totalPendientes = demorasPendientes.length;
 
-    // --- SLA: dentro de 3 días ---
-    const dentroPlazo = results.filter(r => {
-        const d = parseInt(r.DEMORA) || 0;
-        return isGestionado(r.ESTATUS_FINAL || '') && d <= 3;
-    }).length;
+    // --- SLA Auditoría: dentro de 3 días | DUS: antes del día 8 del mes siguiente ---
+    let dentroPlazo, slaPct;
+    if (isDUS) {
+        // SLA DUS: legalizados ANTES de su deadline (día 8 mes siguiente)
+        dentroPlazo = results.filter(r => {
+            if (!isGestionado(r.ESTATUS_FINAL || '')) return false;
+            const dl = r.DEADLINE;
+            if (!dl) return true; // sin fecha → no penalizar
+            return state.fechaHoy <= dl; // se legalizó a tiempo
+        }).length;
+    } else {
+        dentroPlazo = results.filter(r => {
+            const d = parseInt(r.DEMORA) || 0;
+            return isGestionado(r.ESTATUS_FINAL || '') && d <= 3;
+        }).length;
+    }
     const totalProcesados = results.filter(r => isGestionado(r.ESTATUS_FINAL || '')).length;
-    const slaPct = totalProcesados > 0 ? Math.round((dentroPlazo / totalProcesados) * 100) : 0;
+    slaPct = totalProcesados > 0 ? Math.round((dentroPlazo / totalProcesados) * 100) : 0;
+
+    // --- DUS Fuera de SLA: pendientes cuyo deadline ya venció ---
+    let fueraSLA = 0, demoraPromSLA = 0;
+    if (isDUS) {
+        const fueraSLAList = results.filter(r => {
+            if (isGestionado(r.ESTATUS_FINAL || '')) return false;
+            const dl = r.DEADLINE;
+            return dl && state.fechaHoy > dl;
+        });
+        fueraSLA = fueraSLAList.length;
+        if (fueraSLA > 0) {
+            demoraPromSLA = fueraSLAList.reduce((sum, r) => {
+                return sum + Math.max(0, Math.floor((state.fechaHoy - r.DEADLINE) / dayMs));
+            }, 0) / fueraSLA;
+        }
+    }
 
     // --- En Riesgo (>7 días, no gestionados) ---
     const enRiesgo = results.filter(r => {
@@ -3150,7 +3196,8 @@ function calculateKPIs(results) {
         return d > 14 && !isGestionado(r.ESTATUS_FINAL || '');
     }).length;
 
-    // --- T. Gestión Promedio (solo Auditoría, Factura → BL) ---
+    // --- T. Gestión Promedio ---
+    // Auditoría: Factura → BL | DUS: Factura → Hoy (total de días sin gestionar)
     let tGestionProm = null;
     if (!isDUS) {
         const tGestiones = results
@@ -3159,18 +3206,30 @@ function calculateKPIs(results) {
         if (tGestiones.length > 0) {
             tGestionProm = (tGestiones.reduce((a, b) => a + b, 0) / tGestiones.length);
         }
+    } else {
+        // DUS: promedio de DEMORA total (factura → hoy) de TODOS los registros con fecha
+        const demorasTotales = results
+            .filter(r => typeof r.DEMORA === 'number' && r.DEMORA > 0)
+            .map(r => r.DEMORA);
+        if (demorasTotales.length > 0) {
+            tGestionProm = (demorasTotales.reduce((a, b) => a + b, 0) / demorasTotales.length);
+        }
     }
 
     // --- Por Analista ---
     const porAnalista = {};
     results.forEach(r => {
         const resp = r.RESPONSABLE || 'Sin Asignar';
-        if (!porAnalista[resp]) porAnalista[resp] = { total: 0, proc: 0, demoras: [], tgestiones: [] };
+        if (!porAnalista[resp]) porAnalista[resp] = { total: 0, proc: 0, demoras: [], tgestiones: [], fueraSLA: 0 };
         porAnalista[resp].total++;
         const est = r.ESTATUS_FINAL || '';
         if (isGestionado(est)) porAnalista[resp].proc++;
         if (typeof r.DEMORA === 'number' && r.DEMORA > 0 && !isGestionado(est)) porAnalista[resp].demoras.push(r.DEMORA);
         if (typeof r.T_GESTIÓN === 'number' && r.T_GESTIÓN >= 0) porAnalista[resp].tgestiones.push(r.T_GESTIÓN);
+        // DUS: contar fuera de SLA por analista
+        if (isDUS && !isGestionado(est) && r.DEADLINE && state.fechaHoy > r.DEADLINE) {
+            porAnalista[resp].fueraSLA++;
+        }
     });
 
     // --- Por Mes ---
@@ -3182,11 +3241,14 @@ function calculateKPIs(results) {
         } else if (r.FECHA_FACTURA_DATE instanceof Date && !isNaN(r.FECHA_FACTURA_DATE)) {
             mes = r.FECHA_FACTURA_DATE.toISOString().slice(0, 7);
         }
-        if (!porMes[mes]) porMes[mes] = { total: 0, proc: 0, demoras: [] };
+        if (!porMes[mes]) porMes[mes] = { total: 0, proc: 0, demoras: [], fueraSLA: 0 };
         porMes[mes].total++;
         const est = r.ESTATUS_FINAL || '';
         if (isGestionado(est)) porMes[mes].proc++;
         if (typeof r.DEMORA === 'number' && r.DEMORA > 0 && !isGestionado(est)) porMes[mes].demoras.push(r.DEMORA);
+        if (isDUS && !isGestionado(est) && r.DEADLINE && state.fechaHoy > r.DEADLINE) {
+            porMes[mes].fueraSLA++;
+        }
     });
 
     // --- Por Cliente ---
@@ -3203,6 +3265,7 @@ function calculateKPIs(results) {
     return {
         total, totalProcesados, totalPendientes, demoraPromedio, slaPct, dentroPlazo,
         enRiesgo, criticos, tGestionProm,
+        fueraSLA, demoraPromSLA,
         porAnalista, porMes, porCliente
     };
 }
@@ -3230,25 +3293,47 @@ function renderKPIPanel(results) {
         }
     }
 
+    const isDUS = state.currentModule === 'dus';
+
     // 1. Demora Promedio
     const dp = kpis.demoraPromedio.toFixed(1);
     setCard('kpi-demora', dp + 'd',
         kpis.demoraPromedio <= 3 ? 'kpi-green' : kpis.demoraPromedio <= 7 ? 'kpi-yellow' : 'kpi-red');
     const dpSub = document.getElementById('kpi-demora-sub');
     if (dpSub) dpSub.textContent = `${kpis.totalPendientes} pendientes`;
+    const dpLabel = document.getElementById('kpi-demora')?.querySelector('.kpi-label');
+    if (dpLabel) dpLabel.textContent = 'Demora Prom.';
 
     // 2. SLA %
     setCard('kpi-sla', kpis.slaPct + '%',
         kpis.slaPct >= 85 ? 'kpi-green' : kpis.slaPct >= 60 ? 'kpi-yellow' : 'kpi-red');
     const slaSub = document.getElementById('kpi-sla-sub');
-    if (slaSub) slaSub.textContent = `${kpis.dentroPlazo} de ${kpis.totalProcesados} en plazo`;
+    const slaLabel = document.getElementById('kpi-sla')?.querySelector('.kpi-label');
+    if (isDUS) {
+        if (slaLabel) slaLabel.textContent = 'SLA (≤8 día sig.)';
+        if (slaSub) slaSub.textContent = `${kpis.dentroPlazo} de ${kpis.totalProcesados} a tiempo`;
+    } else {
+        if (slaLabel) slaLabel.textContent = 'SLA (≤3 días)';
+        if (slaSub) slaSub.textContent = `${kpis.dentroPlazo} de ${kpis.totalProcesados} en plazo`;
+    }
 
-    // 3. En Riesgo
-    const riesgoPct = kpis.total > 0 ? Math.round((kpis.enRiesgo / kpis.total) * 100) : 0;
-    setCard('kpi-riesgo', String(kpis.enRiesgo),
-        kpis.enRiesgo === 0 ? 'kpi-green' : riesgoPct <= 5 ? 'kpi-yellow' : 'kpi-red');
-    const rSub = document.getElementById('kpi-riesgo-sub');
-    if (rSub) rSub.textContent = `${riesgoPct}% del total`;
+    // 3. En Riesgo / Fuera SLA
+    if (isDUS) {
+        setCard('kpi-riesgo', String(kpis.fueraSLA),
+            kpis.fueraSLA === 0 ? 'kpi-green' : 'kpi-red');
+        const rLabel = document.getElementById('kpi-riesgo')?.querySelector('.kpi-label');
+        if (rLabel) rLabel.textContent = 'Fuera de SLA';
+        const rSub = document.getElementById('kpi-riesgo-sub');
+        if (rSub) rSub.textContent = kpis.fueraSLA > 0 ? `${kpis.demoraPromSLA.toFixed(1)}d prom. atraso` : 'Todo al día';
+    } else {
+        const riesgoPct = kpis.total > 0 ? Math.round((kpis.enRiesgo / kpis.total) * 100) : 0;
+        setCard('kpi-riesgo', String(kpis.enRiesgo),
+            kpis.enRiesgo === 0 ? 'kpi-green' : riesgoPct <= 5 ? 'kpi-yellow' : 'kpi-red');
+        const rLabel = document.getElementById('kpi-riesgo')?.querySelector('.kpi-label');
+        if (rLabel) rLabel.textContent = 'En Riesgo';
+        const rSub = document.getElementById('kpi-riesgo-sub');
+        if (rSub) rSub.textContent = `${riesgoPct}% del total`;
+    }
 
     // 4. Críticos
     setCard('kpi-criticos', String(kpis.criticos),
@@ -3257,12 +3342,25 @@ function renderKPIPanel(results) {
     if (cSub) cSub.textContent = kpis.criticos > 0 ? '¡Acción inmediata!' : 'Sin críticos';
 
     // 5. T. Gestión
+    const tgLabel = document.getElementById('kpi-tgestion')?.querySelector('.kpi-label');
     if (kpis.tGestionProm !== null) {
         const tg = kpis.tGestionProm.toFixed(1);
-        setCard('kpi-tgestion', tg + 'd',
-            kpis.tGestionProm <= 5 ? 'kpi-green' : kpis.tGestionProm <= 10 ? 'kpi-yellow' : 'kpi-red');
+        if (isDUS) {
+            if (tgLabel) tgLabel.textContent = 'T. Total Prom.';
+            setCard('kpi-tgestion', tg + 'd',
+                kpis.tGestionProm <= 20 ? 'kpi-green' : kpis.tGestionProm <= 35 ? 'kpi-yellow' : 'kpi-red');
+            const tgSub = document.getElementById('kpi-tgestion-sub');
+            if (tgSub) tgSub.textContent = 'Factura → Hoy';
+        } else {
+            if (tgLabel) tgLabel.textContent = 'T. Gestión Prom.';
+            setCard('kpi-tgestion', tg + 'd',
+                kpis.tGestionProm <= 5 ? 'kpi-green' : kpis.tGestionProm <= 10 ? 'kpi-yellow' : 'kpi-red');
+            const tgSub = document.getElementById('kpi-tgestion-sub');
+            if (tgSub) tgSub.textContent = 'Factura → BL';
+        }
     } else {
         setCard('kpi-tgestion', '—', null);
+        if (tgLabel) tgLabel.textContent = isDUS ? 'T. Total Prom.' : 'T. Gestión Prom.';
     }
 
     if (window.lucide) lucide.createIcons();

@@ -1876,21 +1876,6 @@ function procesarDUS() {
             estatusFinal = '❌ Pendiente Legalización';
         }
 
-        // --- Sub-estatus SLA: refinar Legalizado/Pendiente con deadline ---
-        const deadlineDate = fechaFacturaDate ? calcularDeadlineDUS(fechaFacturaDate) : null;
-        if (deadlineDate && estatusFinal === '✅ Legalizado') {
-            if (state.fechaHoy > deadlineDate) {
-                estatusFinal = '⚠️ Legalizado Fuera de Plazo';
-            } else {
-                estatusFinal = '✅ Legalizado (A Tiempo)';
-            }
-        } else if (deadlineDate && estatusFinal === '❌ Pendiente Legalización') {
-            if (state.fechaHoy > deadlineDate) {
-                estatusFinal = '🔴 Pendiente (Fuera de Plazo)';
-            } else {
-                estatusFinal = '🔵 Pendiente (En Plazo)';
-            }
-        }
 
         // Extraer todos los números que parecen pedidos (7-10 dígitos)
         const pedidoCandidates = rawReferencia.match(/\d{7,10}/g) || [];
@@ -1927,6 +1912,22 @@ function procesarDUS() {
         if (!analistaFinal) {
             analistaFinal = viaTransporte || 'PENDIENTE';
             metodoCruce = viaTransporte ? 'Vía Transporte' : 'Sin Asignar';
+        }
+
+        // --- Sub-estatus SLA: refinar Legalizado/Pendiente con deadline ---
+        const deadlineDate = fechaFacturaDate ? calcularDeadlineDUS(fechaFacturaDate) : null;
+        if (deadlineDate && estatusFinal === '✅ Legalizado') {
+            if (state.fechaHoy > deadlineDate) {
+                estatusFinal = '⚠️ Legalizado Fuera de Plazo';
+            } else {
+                estatusFinal = '✅ Legalizado (A Tiempo)';
+            }
+        } else if (deadlineDate && estatusFinal === '❌ Pendiente Legalización') {
+            if (state.fechaHoy > deadlineDate) {
+                estatusFinal = '🔴 Pendiente (Fuera de Plazo)';
+            } else {
+                estatusFinal = '🔵 Pendiente (En Plazo)';
+            }
         }
 
         return {

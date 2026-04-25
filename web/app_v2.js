@@ -1927,9 +1927,8 @@ function procesarDUS() {
         if (deadlineDate && estatusFinal === '✅ Legalizado' && esFacturaReciente) {
             if (state.fechaHoy > deadlineDate) {
                 estatusFinal = '⚠️ Legalizado Fuera de Plazo';
-            } else {
-                estatusFinal = '✅ Legalizado (A Tiempo)';
             }
+            // Si está a tiempo, se queda como '✅ Legalizado' sin cambios
         } else if (deadlineDate && estatusFinal === '❌ Pendiente Legalización') {
             // Pendientes: siempre evaluar deadline sin importar el mes
             if (state.fechaHoy > deadlineDate) {
@@ -2044,7 +2043,7 @@ function renderDUS(selected = []) {
 /** Clasifica ESTADO GENERAL para el módulo DUS */
 function getDUSEstadoGeneral(estatusFinal) {
     const s = String(estatusFinal || '');
-    if (s.includes('Legalizado') && s.includes('A Tiempo'))       return { label: '✅ Legalizado (A Tiempo)',       badgeClass: 'badge-green' };
+    // 'A Tiempo' ya no es estado separado — todo Legalizado sin 'Fuera de Plazo' es a tiempo
     if (s.includes('Legalizado') && s.includes('Fuera de Plazo')) return { label: '⚠️ Legalizado Fuera de Plazo',   badgeClass: 'badge-orange' };
     if (s.includes('✅') || s.includes('Legalizado'))              return { label: '✅ Legalizado',                   badgeClass: 'badge-green' };
     if (s.includes('Pendiente') && s.includes('Fuera de Plazo'))  return { label: '🔴 Pendiente (Fuera de Plazo)',   badgeClass: 'badge-critical' };
@@ -2172,9 +2171,7 @@ function exportToExcel() {
             let fontColor = "000000";
             
             // DUS sub-estatus
-            if (val.includes('Legalizado') && val.includes('A Tiempo')) {
-                bgColor = "dcfce7"; fontColor = "166534"; // Verde suave
-            } else if (val.includes('Legalizado') && val.includes('Fuera de Plazo')) {
+            if (val.includes('Legalizado') && val.includes('Fuera de Plazo')) {
                 bgColor = "ffedd5"; fontColor = "9a3412"; // Naranja suave
             } else if (val.includes('Pendiente') && val.includes('Fuera de Plazo')) {
                 bgColor = "fee2e2"; fontColor = "991b1b"; // Rojo suave
@@ -3519,7 +3516,7 @@ function exportKPIExcel() {
                 let aTiempo = 0, fueraPlazo = 0;
                 results.filter(r => (r.RESPONSABLE || 'Sin Asignar') === code).forEach(r => {
                     const est = r.ESTATUS_FINAL || '';
-                    if (est.includes('Legalizado') && est.includes('A Tiempo')) aTiempo++;
+                    if (est.includes('Legalizado') && !est.includes('Fuera de Plazo')) aTiempo++;
                     else if (est.includes('Legalizado') && est.includes('Fuera de Plazo')) fueraPlazo++;
                 });
                 const slaPct = (aTiempo + fueraPlazo) > 0 ? Math.round((aTiempo / (aTiempo + fueraPlazo)) * 100) : 0;
@@ -3567,7 +3564,7 @@ function exportKPIExcel() {
                     return fd.toISOString().slice(0, 7) === mes;
                 }).forEach(r => {
                     const est = r.ESTATUS_FINAL || '';
-                    if (est.includes('Legalizado') && est.includes('A Tiempo')) aTiempo++;
+                    if (est.includes('Legalizado') && !est.includes('Fuera de Plazo')) aTiempo++;
                     else if (est.includes('Legalizado') && est.includes('Fuera de Plazo')) fueraPlazo++;
                 });
                 const slaPct = (aTiempo + fueraPlazo) > 0 ? Math.round((aTiempo / (aTiempo + fueraPlazo)) * 100) : 0;

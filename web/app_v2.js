@@ -2159,7 +2159,7 @@ function exportToExcel() {
     if (ws['!ref']) {
         const range = XLSX.utils.decode_range(ws['!ref']);
         
-        // Colorear contenido (ESTATUS FINAL es la Columna A = 0)
+        // Colorear filas completas según ESTADO GENERAL (Columna A = 0)
         for(let R = range.s.r + 1; R <= range.e.r; ++R) {
             const cellRef = XLSX.utils.encode_cell({c: 0, r: R});
             const cell = ws[cellRef];
@@ -2169,30 +2169,45 @@ function exportToExcel() {
             let bgColor = "FFFFFF";
             let fontColor = "000000";
             
-            if (val.includes('✅') || val.includes('Validado')) {
-                bgColor = "10B981"; // Verde
-                fontColor = "FFFFFF";
-            } else if (val.includes('IVV')) {
-                bgColor = "F59E0B"; // Naranjo
-                fontColor = "FFFFFF";
-            } else if (val.includes('📦')) {
-                bgColor = "F59E0B"; // Amarillo/Naranjo
-                fontColor = "FFFFFF";
-            } else if (val.includes('Error')) {
-                bgColor = "9F1239"; // Crítico/Burdeo
-                fontColor = "FFFFFF";
+            // DUS sub-estatus
+            if (val.includes('Legalizado') && val.includes('A Tiempo')) {
+                bgColor = "dcfce7"; fontColor = "166534"; // Verde suave
+            } else if (val.includes('Legalizado') && val.includes('Fuera de Plazo')) {
+                bgColor = "ffedd5"; fontColor = "9a3412"; // Naranja suave
+            } else if (val.includes('Pendiente') && val.includes('Fuera de Plazo')) {
+                bgColor = "fee2e2"; fontColor = "991b1b"; // Rojo suave
+            } else if (val.includes('Pendiente') && val.includes('En Plazo')) {
+                bgColor = "dbeafe"; fontColor = "1e40af"; // Azul suave
+            } else if (val.includes('Sin Zarpe')) {
+                bgColor = "fef9c3"; fontColor = "854d0e"; // Amarillo suave
+            // Auditoría / genéricos
+            } else if (val.includes('✅') || val.includes('Legalizado') || val.includes('Validado')) {
+                bgColor = "dcfce7"; fontColor = "166534";
+            } else if (val.includes('IVV') || val.includes('📦')) {
+                bgColor = "ffedd5"; fontColor = "9a3412";
+            } else if (val.includes('Error') || val.includes('Anulado')) {
+                bgColor = "fecaca"; fontColor = "7f1d1d";
             } else if (val.includes('❌')) {
-                bgColor = "EF4444"; // Rojo
-                fontColor = "FFFFFF";
+                bgColor = "fee2e2"; fontColor = "991b1b";
             } else if (val.includes('🚚')) {
-                bgColor = "3B82F6"; // Azul
-                fontColor = "FFFFFF";
+                bgColor = "dbeafe"; fontColor = "1e40af";
             }
             
-            cell.s = {
+            // Aplicar a TODA la fila
+            const rowStyle = {
+                fill: { fgColor: { rgb: bgColor } },
+                font: { color: { rgb: fontColor } }
+            };
+            const boldRowStyle = {
                 fill: { fgColor: { rgb: bgColor } },
                 font: { color: { rgb: fontColor }, bold: true }
             };
+            
+            for (let C = range.s.c; C <= range.e.c; C++) {
+                const addr = XLSX.utils.encode_cell({c: C, r: R});
+                if (!ws[addr]) ws[addr] = { v: '', t: 's' };
+                ws[addr].s = C === 0 ? boldRowStyle : rowStyle;
+            }
         }
         
         // Colorear la cabecera (Fila 0)
@@ -2200,7 +2215,7 @@ function exportToExcel() {
             const headRef = XLSX.utils.encode_cell({c: C, r: 0});
             if(ws[headRef]) {
                 ws[headRef].s = {
-                    fill: { fgColor: { rgb: "1E293B" } }, // Dark header
+                    fill: { fgColor: { rgb: "1E293B" } },
                     font: { color: { rgb: "FFFFFF" }, bold: true }
                 };
             }

@@ -788,6 +788,8 @@ function runDUS() {
             renderDUS(selectedDUS);
             updateStats();
             updateChartForDUS(state.dusResults);
+            updateTrendChart();
+            updateHeatmapChart(state.dusResults);
             renderKPIPanel(state.dusResults);
             if (exportBtnDus) exportBtnDus.disabled = false;
             // Auto-guardar en memoria los registros legalizados

@@ -53,7 +53,7 @@
         .refresh-btn.loading i { animation:spin .8s linear infinite; }
         @keyframes spin { to{transform:rotate(360deg)} }
 
-        main { max-width:1400px; margin:0 auto; padding:30px 20px 60px; }
+        main { max-width:1600px; margin:0 auto; padding:30px 20px 60px; }
 
         /* Tabs */
         .tabs { display:flex; gap:4px; margin-bottom:24px; background:var(--glass-heavy); padding:4px;
@@ -82,12 +82,13 @@
         .search-box { background:var(--glass-heavy); border:1px solid var(--glass-border); border-radius:8px;
                       padding:6px 12px; color:var(--text-main); font-size:0.85rem; width:240px; outline:none; }
         .search-box:focus { border-color:var(--primary); }
-        table { width:100%; border-collapse:collapse; }
-        thead th { position:sticky; top:0; background:rgba(10,10,11,0.9); padding:12px 14px; text-align:left;
-                   font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);
+        table { width:100%; border-collapse:collapse; table-layout:fixed; }
+        thead th { position:sticky; top:0; background:rgba(10,10,11,0.9); padding:10px 10px; text-align:left;
+                   font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);
                    border-bottom:1px solid var(--glass-border); white-space:nowrap; }
-        tbody td { padding:10px 14px; font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.03);
-                   white-space:nowrap; max-width:200px; overflow:hidden; text-overflow:ellipsis; }
+        tbody td { padding:8px 10px; font-size:0.82rem; border-bottom:1px solid rgba(255,255,255,0.03);
+                   max-width:180px; overflow:hidden; text-overflow:ellipsis; }
+        tbody td.wrap { white-space:normal; word-break:break-word; }
         tbody tr { transition:background .15s; }
         tbody tr:hover { background:rgba(0,210,255,0.04); }
         .badge { padding:3px 10px; border-radius:6px; font-size:0.75rem; font-weight:600; }
@@ -418,7 +419,20 @@ function renderTable() {
     const empty = document.getElementById('empty');
     document.getElementById('table-title').innerHTML = `<i data-lucide="list"></i> Pendientes ${currentMod} (${filtered.length})`;
 
-    thead.innerHTML = '<tr>' + headers.map(h => `<th>${esc(h)}</th>`).join('') + '<th>Notas</th></tr>';
+    // Column widths for fixed layout
+    const COL_W = {
+        COMEX: { 'ESTADO GENERAL':'100px','DETALLE':'130px','DEMORA':'70px','T. GESTIÓN':'70px',
+                 'N° PEDIDO':'100px','SOLICITANTE':'auto','RESPONSABLE':'110px','FECHA FACTURA':'100px','MOTIVO':'auto' },
+        DUS:   { 'ESTADO GENERAL':'95px','DETALLE':'140px','N° PEDIDO':'95px','CONSIGNATARIO':'auto',
+                 'RESPONSABLE':'100px','FECHA FACTURA':'95px','DEMORA (días)':'65px','DEADLINE':'90px','ATRASO S/I':'60px','OBSERVACIONES':'auto' }
+    };
+    const widths = COL_W[currentMod] || {};
+    const wrapCols = new Set(['SOLICITANTE','CONSIGNATARIO','MOTIVO','OBSERVACIONES','DETALLE']);
+
+    thead.innerHTML = '<tr>' + headers.map(h => {
+        const w = widths[h] || 'auto';
+        return `<th style="width:${w}">${esc(h)}</th>`;
+    }).join('') + '<th style="width:70px">Notas</th></tr>';
 
     if (filtered.length === 0) {
         tbody.innerHTML = '';
@@ -436,12 +450,13 @@ function renderTable() {
 
             const cells = headers.map(h => {
                 const val = r[h] !== undefined ? r[h] : '';
+                const wc = wrapCols.has(h) ? ' wrap' : '';
                 if (h === demoraKey) return `<td><span class="badge ${cls}">${esc(String(val))} días</span></td>`;
                 if (h === 'ESTADO GENERAL') {
                     const ec = String(val).includes('Pendiente') ? 'badge-orange' : String(val).includes('Error') ? 'badge-red' : 'badge-blue';
                     return `<td><span class="badge ${ec}">${esc(String(val))}</span></td>`;
                 }
-                return `<td title="${esc(String(val))}">${esc(String(val))}</td>`;
+                return `<td class="${wc}" title="${esc(String(val))}">${esc(String(val))}</td>`;
             }).join('');
 
             const noteBtn = noteCount > 0

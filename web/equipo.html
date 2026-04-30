@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AQUASHIELD · ExportDesk Live | Panel del Equipo</title>
+    <meta name="description" content="Dashboard compartido de pendientes y observaciones del equipo de exportaciones.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@0.344.0"></script>
+    <style>
+        :root {
+            --primary: #00d2ff;
+            --primary-glow: rgba(0,210,255,0.5);
+            --secondary: #3a7bd5;
+            --bg-dark: #0a0a0b;
+            --glass: rgba(255,255,255,0.03);
+            --glass-border: rgba(255,255,255,0.08);
+            --glass-heavy: rgba(255,255,255,0.06);
+            --text-main: #e0e0e0;
+            --text-muted: #a0a0a0;
+            --green: #4ade80;
+            --orange: #fb923c;
+            --red: #f87171;
+            --blue: #3b82f6;
+            --card-shadow: 0 8px 32px 0 rgba(0,0,0,0.37);
+        }
+        * { margin:0; padding:0; box-sizing:border-box; font-family:'Inter',sans-serif; }
+        body { background:var(--bg-dark); color:var(--text-main); min-height:100vh; overflow-x:hidden; }
+        .bg-blobs { position:fixed; top:0; left:0; width:100vw; height:100vh; z-index:-1; overflow:hidden; filter:blur(100px); }
+        .blob { position:absolute; border-radius:50%; opacity:0.15; animation:mv 20s infinite alternate; }
+        .b1 { width:600px; height:600px; background:var(--primary); top:-100px; right:-100px; }
+        .b2 { width:500px; height:500px; background:var(--secondary); bottom:-100px; left:-100px; animation-delay:-5s; }
+        @keyframes mv { from{transform:translate(0,0) scale(1)} to{transform:translate(50px,50px) scale(1.1)} }
+
+        /* Header */
+        .header { display:flex; justify-content:space-between; align-items:center; padding:16px 32px;
+                   background:var(--glass); backdrop-filter:blur(12px); border-bottom:1px solid var(--glass-border);
+                   position:sticky; top:0; z-index:100; }
+        .logo { display:flex; align-items:center; gap:12px; }
+        .logo-icon { width:40px; height:40px; background:linear-gradient(135deg,var(--primary),var(--secondary));
+                     border-radius:10px; display:flex; align-items:center; justify-content:center; color:#fff;
+                     box-shadow:0 0 20px var(--primary-glow); }
+        .logo-text { font-size:1.15rem; letter-spacing:1px; color:#fff; }
+        .header-right { display:flex; align-items:center; gap:12px; }
+        .status-dot { width:8px; height:8px; background:var(--green); border-radius:50%; animation:pulse 2s infinite; }
+        @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(74,222,128,0.7)} 70%{box-shadow:0 0 0 10px rgba(74,222,128,0)} }
+        .refresh-btn { background:var(--glass-heavy); border:1px solid var(--glass-border); color:var(--text-main);
+                       padding:8px 16px; border-radius:8px; cursor:pointer; font-size:0.85rem; display:flex;
+                       align-items:center; gap:6px; transition:all .2s; }
+        .refresh-btn:hover { border-color:var(--primary); color:var(--primary); }
+        .refresh-btn.loading i { animation:spin .8s linear infinite; }
+        @keyframes spin { to{transform:rotate(360deg)} }
+
+        main { max-width:1400px; margin:0 auto; padding:30px 20px 60px; }
+
+        /* Tabs */
+        .tabs { display:flex; gap:4px; margin-bottom:24px; background:var(--glass-heavy); padding:4px;
+                border-radius:12px; border:1px solid var(--glass-border); width:fit-content; }
+        .tab { padding:10px 24px; border-radius:10px; border:none; background:transparent; color:var(--text-muted);
+               cursor:pointer; font-size:0.9rem; font-weight:600; transition:all .2s; display:flex; align-items:center; gap:8px; }
+        .tab.active { background:linear-gradient(135deg,var(--primary),var(--secondary)); color:#fff; box-shadow:0 0 20px var(--primary-glow); }
+        .tab:not(.active):hover { color:var(--text-main); background:rgba(255,255,255,0.04); }
+        .tab .count { background:rgba(255,255,255,0.15); padding:2px 8px; border-radius:10px; font-size:0.75rem; }
+        .tab.active .count { background:rgba(255,255,255,0.25); }
+
+        /* Stats */
+        .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:24px; }
+        .stat-card { background:var(--glass); backdrop-filter:blur(8px); border:1px solid var(--glass-border);
+                     border-radius:14px; padding:20px; text-align:center; }
+        .stat-val { font-size:2rem; font-weight:800; background:linear-gradient(135deg,var(--primary),var(--secondary));
+                    -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+        .stat-label { font-size:0.8rem; color:var(--text-muted); margin-top:4px; }
+
+        /* Table */
+        .table-wrap { background:var(--glass); backdrop-filter:blur(8px); border:1px solid var(--glass-border);
+                      border-radius:14px; overflow:hidden; }
+        .table-header { display:flex; justify-content:space-between; align-items:center; padding:16px 20px;
+                        border-bottom:1px solid var(--glass-border); }
+        .table-header h2 { font-size:1rem; font-weight:600; display:flex; align-items:center; gap:8px; }
+        .search-box { background:var(--glass-heavy); border:1px solid var(--glass-border); border-radius:8px;
+                      padding:6px 12px; color:var(--text-main); font-size:0.85rem; width:240px; outline:none; }
+        .search-box:focus { border-color:var(--primary); }
+        table { width:100%; border-collapse:collapse; }
+        thead th { position:sticky; top:0; background:rgba(10,10,11,0.9); padding:12px 14px; text-align:left;
+                   font-size:0.75rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);
+                   border-bottom:1px solid var(--glass-border); white-space:nowrap; }
+        tbody td { padding:10px 14px; font-size:0.85rem; border-bottom:1px solid rgba(255,255,255,0.03);
+                   white-space:nowrap; max-width:200px; overflow:hidden; text-overflow:ellipsis; }
+        tbody tr { transition:background .15s; }
+        tbody tr:hover { background:rgba(0,210,255,0.04); }
+        .badge { padding:3px 10px; border-radius:6px; font-size:0.75rem; font-weight:600; }
+        .badge-green { background:rgba(74,222,128,0.15); color:var(--green); }
+        .badge-orange { background:rgba(251,146,60,0.15); color:var(--orange); }
+        .badge-red { background:rgba(248,113,113,0.15); color:var(--red); }
+        .badge-blue { background:rgba(59,130,246,0.15); color:var(--blue); }
+
+        /* Note button */
+        .note-btn { background:none; border:1px solid var(--glass-border); color:var(--text-muted); padding:4px 10px;
+                    border-radius:6px; cursor:pointer; font-size:0.75rem; transition:all .15s; display:flex;
+                    align-items:center; gap:4px; white-space:nowrap; }
+        .note-btn:hover { border-color:var(--primary); color:var(--primary); }
+        .note-btn.has-notes { border-color:var(--orange); color:var(--orange); background:rgba(251,146,60,0.08); }
+
+        /* Note Modal */
+        .modal-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(10,10,11,0.85);
+                         backdrop-filter:blur(8px); z-index:1000; display:none; align-items:center; justify-content:center; }
+        .modal-overlay.show { display:flex; }
+        .modal { background:#141416; border:1px solid var(--glass-border); border-radius:16px; width:500px;
+                 max-width:90vw; max-height:80vh; display:flex; flex-direction:column; box-shadow:var(--card-shadow); }
+        .modal-head { padding:20px; border-bottom:1px solid var(--glass-border); display:flex; justify-content:space-between; align-items:center; }
+        .modal-head h3 { font-size:1rem; display:flex; align-items:center; gap:8px; }
+        .modal-close { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:1.2rem; }
+        .modal-close:hover { color:var(--red); }
+        .modal-body { padding:20px; overflow-y:auto; flex:1; }
+        .notes-list { display:flex; flex-direction:column; gap:10px; margin-bottom:16px; }
+        .note-item { background:var(--glass-heavy); border:1px solid var(--glass-border); border-radius:10px; padding:12px; }
+        .note-meta { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+        .note-author { font-weight:600; font-size:0.85rem; color:var(--primary); }
+        .note-date { font-size:0.7rem; color:var(--text-muted); }
+        .note-text { font-size:0.85rem; line-height:1.5; color:var(--text-main); }
+        .note-del { background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:0.7rem; margin-top:6px; }
+        .note-del:hover { color:var(--red); }
+        .new-note { display:flex; flex-direction:column; gap:8px; }
+        .new-note input, .new-note textarea { background:var(--glass-heavy); border:1px solid var(--glass-border);
+            border-radius:8px; padding:10px; color:var(--text-main); font-size:0.85rem; outline:none; font-family:inherit; }
+        .new-note input:focus, .new-note textarea:focus { border-color:var(--primary); }
+        .new-note textarea { resize:vertical; min-height:60px; }
+        .submit-note { background:linear-gradient(135deg,var(--primary),var(--secondary)); border:none; color:#fff;
+                       padding:10px 20px; border-radius:8px; cursor:pointer; font-weight:600; font-size:0.85rem;
+                       transition:opacity .2s; }
+        .submit-note:hover { opacity:0.9; }
+        .submit-note:disabled { opacity:0.4; cursor:not-allowed; }
+        .empty-notes { text-align:center; color:var(--text-muted); padding:20px; font-size:0.85rem; }
+
+        /* Timestamp */
+        .timestamp { text-align:center; color:var(--text-muted); font-size:0.75rem; margin-top:20px; }
+
+        /* Empty state */
+        .empty-state { text-align:center; padding:60px 20px; color:var(--text-muted); }
+        .empty-state i { width:48px; height:48px; margin-bottom:12px; opacity:0.3; }
+        .empty-state p { font-size:0.9rem; }
+
+        /* Name banner */
+        .name-banner { background:var(--glass); backdrop-filter:blur(8px); border:1px solid var(--glass-border);
+                       border-radius:14px; padding:20px 24px; margin-bottom:24px; display:flex; align-items:center;
+                       gap:12px; }
+        .name-banner input { flex:1; background:var(--glass-heavy); border:1px solid var(--glass-border);
+                             border-radius:8px; padding:10px 14px; color:var(--text-main); font-size:0.9rem; outline:none; }
+        .name-banner input:focus { border-color:var(--primary); }
+        .name-banner label { font-size:0.85rem; color:var(--text-muted); white-space:nowrap; }
+
+        @media(max-width:768px) {
+            .header { padding:12px 16px; flex-wrap:wrap; gap:8px; }
+            main { padding:16px 12px 40px; }
+            .stats { grid-template-columns:repeat(2,1fr); }
+            .search-box { width:100%; }
+            .table-header { flex-direction:column; gap:8px; }
+        }
+    </style>
+</head>
+<body>
+    <div class="bg-blobs"><div class="blob b1"></div><div class="blob b2"></div></div>
+
+    <header class="header">
+        <div class="logo">
+            <span class="logo-icon"><i data-lucide="shield-check"></i></span>
+            <span class="logo-text">AQUASHIELD <strong>· ExportDesk Live</strong></span>
+        </div>
+        <div class="header-right">
+            <span class="status-dot"></span>
+            <button id="refresh-btn" class="refresh-btn" onclick="loadAll()">
+                <i data-lucide="refresh-cw"></i> Actualizar
+            </button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Name -->
+        <div class="name-banner">
+            <label><i data-lucide="user"></i></label>
+            <input id="author-name" type="text" placeholder="Escribe tu nombre para anotar observaciones..." />
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-mod="COMEX" onclick="switchTab('COMEX')">
+                <i data-lucide="file-search"></i> Auditoría Comex <span class="count" id="count-comex">0</span>
+            </button>
+            <button class="tab" data-mod="DUS" onclick="switchTab('DUS')">
+                <i data-lucide="file-text"></i> DUS <span class="count" id="count-dus">0</span>
+            </button>
+        </div>
+
+        <!-- Stats -->
+        <div class="stats" id="stats-bar"></div>
+
+        <!-- Table -->
+        <div class="table-wrap">
+            <div class="table-header">
+                <h2 id="table-title"><i data-lucide="list"></i> Pendientes</h2>
+                <input class="search-box" id="search" type="text" placeholder="Buscar pedido, cliente..." oninput="renderTable()">
+            </div>
+            <div style="overflow-x:auto;">
+                <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
+            </div>
+            <div class="empty-state" id="empty" style="display:none;">
+                <i data-lucide="inbox"></i>
+                <p>No hay pendientes publicados aún</p>
+            </div>
+        </div>
+
+        <p class="timestamp" id="ts"></p>
+    </main>
+
+    <!-- Note Modal -->
+    <div class="modal-overlay" id="note-modal">
+        <div class="modal">
+            <div class="modal-head">
+                <h3><i data-lucide="message-square"></i> Notas — Pedido <span id="modal-pedido"></span></h3>
+                <button class="modal-close" onclick="closeModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="notes-list" id="notes-list"></div>
+                <div class="new-note">
+                    <textarea id="note-text" placeholder="Escribe tu observación..."></textarea>
+                    <button class="submit-note" id="submit-note-btn" onclick="submitNote()">
+                        Enviar Nota
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbwG82WPhlVyhcleKd5zUQPxGQa_teAXEX4NVifB0Yc6qufeEEuTDpBsri0HfZX4-QVTRQ/exec';
+
+const HEADERS = {
+    COMEX: ['ESTADO GENERAL','DETALLE','DEMORA','T. GESTIÓN','N° PEDIDO','SOLICITANTE','RESPONSABLE','FECHA FACTURA','MOTIVO'],
+    DUS:   ['ESTADO GENERAL','DETALLE','N° PEDIDO','CONSIGNATARIO','RESPONSABLE','FECHA FACTURA','DEMORA (días)','DEADLINE','ATRASO S/I','OBSERVACIONES']
+};
+
+let DATA = { comex:[], dus:[], notas_comex:[], notas_dus:[] };
+let currentMod = 'COMEX';
+
+// ── Init ──
+document.addEventListener('DOMContentLoaded', () => {
+    const saved = localStorage.getItem('edl_author');
+    if (saved) document.getElementById('author-name').value = saved;
+    document.getElementById('author-name').addEventListener('change', e => {
+        localStorage.setItem('edl_author', e.target.value.trim());
+    });
+    loadAll();
+    lucide.createIcons();
+});
+
+// ── Fetch ──
+async function loadAll() {
+    const btn = document.getElementById('refresh-btn');
+    btn.classList.add('loading');
+    try {
+        const r = await fetch(API + '?action=todo');
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error);
+        DATA.comex = j.comex?.data || [];
+        DATA.dus = j.dus?.data || [];
+        DATA.notas_comex = j.notas_comex?.data || [];
+        DATA.notas_dus = j.notas_dus?.data || [];
+        document.getElementById('count-comex').textContent = DATA.comex.length;
+        document.getElementById('count-dus').textContent = DATA.dus.length;
+        document.getElementById('ts').textContent = 'Última actualización: ' + new Date().toLocaleString('es-CL');
+        renderStats();
+        renderTable();
+    } catch(e) {
+        console.error(e);
+        document.getElementById('ts').textContent = '⚠️ Error al cargar: ' + e.message;
+    }
+    btn.classList.remove('loading');
+    lucide.createIcons();
+}
+
+// ── Tabs ──
+function switchTab(mod) {
+    currentMod = mod;
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mod === mod));
+    renderStats();
+    renderTable();
+}
+
+// ── Stats ──
+function renderStats() {
+    const rows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const notes = currentMod === 'COMEX' ? DATA.notas_comex : DATA.notas_dus;
+    const bar = document.getElementById('stats-bar');
+    const demoraKey = currentMod === 'COMEX' ? 'DEMORA' : 'DEMORA (días)';
+    const criticos = rows.filter(r => parseInt(r[demoraKey]) >= 10).length;
+    const conNotas = new Set(notes.map(n => n['N° PEDIDO'])).size;
+    bar.innerHTML = `
+        <div class="stat-card"><div class="stat-val">${rows.length}</div><div class="stat-label">Pendientes ${currentMod}</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--red)">${criticos}</div><div class="stat-label">Críticos (≥10 días)</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--orange)">${conNotas}</div><div class="stat-label">Con observaciones</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--green)">${notes.length}</div><div class="stat-label">Notas totales</div></div>
+    `;
+}
+
+// ── Table ──
+function esc(s) { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+
+function renderTable() {
+    const rows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const headers = HEADERS[currentMod];
+    const q = document.getElementById('search').value.toLowerCase();
+    const filtered = q ? rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))) : rows;
+
+    const thead = document.getElementById('thead');
+    const tbody = document.getElementById('tbody');
+    const empty = document.getElementById('empty');
+    document.getElementById('table-title').innerHTML = `<i data-lucide="list"></i> Pendientes ${currentMod} (${filtered.length})`;
+
+    thead.innerHTML = '<tr>' + headers.map(h => `<th>${esc(h)}</th>`).join('') + '<th>Notas</th></tr>';
+
+    if (filtered.length === 0) {
+        tbody.innerHTML = '';
+        empty.style.display = 'block';
+    } else {
+        empty.style.display = 'none';
+        const demoraKey = currentMod === 'COMEX' ? 'DEMORA' : 'DEMORA (días)';
+        const notesArr = currentMod === 'COMEX' ? DATA.notas_comex : DATA.notas_dus;
+
+        tbody.innerHTML = filtered.map(r => {
+            const pedido = r['N° PEDIDO'] || '';
+            const noteCount = notesArr.filter(n => String(n['N° PEDIDO']) === String(pedido)).length;
+            const demora = parseInt(r[demoraKey]) || 0;
+            const cls = demora >= 10 ? 'badge-red' : demora >= 6 ? 'badge-orange' : 'badge-green';
+
+            const cells = headers.map(h => {
+                const val = r[h] !== undefined ? r[h] : '';
+                if (h === demoraKey) return `<td><span class="badge ${cls}">${esc(String(val))} días</span></td>`;
+                if (h === 'ESTADO GENERAL') {
+                    const ec = String(val).includes('Pendiente') ? 'badge-orange' : String(val).includes('Error') ? 'badge-red' : 'badge-blue';
+                    return `<td><span class="badge ${ec}">${esc(String(val))}</span></td>`;
+                }
+                return `<td title="${esc(String(val))}">${esc(String(val))}</td>`;
+            }).join('');
+
+            const noteBtn = noteCount > 0
+                ? `<button class="note-btn has-notes" onclick="openModal('${esc(String(pedido))}')"><i data-lucide="message-square"></i> ${noteCount}</button>`
+                : `<button class="note-btn" onclick="openModal('${esc(String(pedido))}')"><i data-lucide="plus"></i> Nota</button>`;
+
+            return `<tr>${cells}<td>${noteBtn}</td></tr>`;
+        }).join('');
+    }
+    lucide.createIcons();
+}
+
+// ── Modal ──
+let modalPedido = '';
+
+function openModal(pedido) {
+    modalPedido = pedido;
+    document.getElementById('modal-pedido').textContent = pedido;
+    document.getElementById('note-modal').classList.add('show');
+    renderNotes();
+}
+
+function closeModal() {
+    document.getElementById('note-modal').classList.remove('show');
+    modalPedido = '';
+}
+
+function renderNotes() {
+    const notes = (currentMod === 'COMEX' ? DATA.notas_comex : DATA.notas_dus)
+        .filter(n => String(n['N° PEDIDO']) === String(modalPedido));
+    const list = document.getElementById('notes-list');
+    if (notes.length === 0) {
+        list.innerHTML = '<div class="empty-notes">Sin notas aún. ¡Sé el primero!</div>';
+    } else {
+        list.innerHTML = notes.map(n => `
+            <div class="note-item">
+                <div class="note-meta">
+                    <span class="note-author">${esc(n['AUTOR'])}</span>
+                    <span class="note-date">${new Date(n['FECHA']).toLocaleString('es-CL')}</span>
+                </div>
+                <div class="note-text">${esc(n['NOTA'])}</div>
+                <button class="note-del" onclick="deleteNote('${esc(String(modalPedido))}','${esc(n['FECHA'])}')">🗑 Eliminar</button>
+            </div>
+        `).join('');
+    }
+    lucide.createIcons();
+}
+
+// ── Submit Note ──
+async function submitNote() {
+    const nota = document.getElementById('note-text').value.trim();
+    const autor = document.getElementById('author-name').value.trim() || 'Anónimo';
+    if (!nota) return;
+    const btn = document.getElementById('submit-note-btn');
+    btn.disabled = true; btn.textContent = 'Enviando...';
+    try {
+        await fetch(API, {
+            method: 'POST', mode: 'no-cors',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ action:'nota', modulo:currentMod, pedido:modalPedido, autor, nota })
+        });
+        document.getElementById('note-text').value = '';
+        // Small delay for Google Sheets to process
+        await new Promise(r => setTimeout(r, 1500));
+        await loadAll();
+        renderNotes();
+    } catch(e) { console.error(e); }
+    btn.disabled = false; btn.textContent = 'Enviar Nota';
+}
+
+// ── Delete Note ──
+async function deleteNote(pedido, fecha) {
+    if (!confirm('¿Eliminar esta nota?')) return;
+    try {
+        await fetch(API, {
+            method: 'POST', mode: 'no-cors',
+            headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({ action:'borrar_nota', modulo:currentMod, pedido, fecha })
+        });
+        await new Promise(r => setTimeout(r, 1500));
+        await loadAll();
+        renderNotes();
+    } catch(e) { console.error(e); }
+}
+
+// Auto-refresh every 60s
+setInterval(loadAll, 60000);
+</script>
+</body>
+</html>

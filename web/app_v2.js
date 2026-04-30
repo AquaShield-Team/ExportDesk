@@ -760,6 +760,11 @@ function runAudit() {
             renderKPIPanel(state.currentModule === 'dus' ? state.dusResults : state.results);
             if(exportBtn) exportBtn.disabled = false;
             if(exportBtnDus) exportBtnDus.disabled = false;
+            // Habilitar botones Publicar Live
+            const pbC = document.getElementById('publish-comex-btn');
+            const pbD = document.getElementById('publish-dus-btn');
+            if(pbC) pbC.disabled = false;
+            if(pbD) pbD.disabled = false;
             // Auto-guardar en memoria los registros procesados/legalizados
             saveToMemory('auditoria', state.results);
             saveToMemory('dus', state.dusResults);
@@ -3782,3 +3787,80 @@ function exportKPIExcel() {
     XLSX.writeFile(wb, fileName);
 }
 
+
+// ═══════════════════════════════════════════
+// Publicar Live — Google Sheets Backend
+// ═══════════════════════════════════════════
+const LIVE_API = 'https://script.google.com/macros/s/AKfycbwG82WPhlVyhcleKd5zUQPxGQa_teAXEX4NVifB0Yc6qufeEEuTDpBsri0HfZX4-QVTRQ/exec';
+
+const LIVE_HEADERS = {
+    COMEX: ['ESTADO GENERAL','DETALLE','DEMORA','T. GESTIÓN','N° PEDIDO','SOLICITANTE','RESPONSABLE','FECHA FACTURA','MOTIVO'],
+    DUS:   ['ESTADO GENERAL','DETALLE','N° PEDIDO','CONSIGNATARIO','RESPONSABLE','FECHA FACTURA','DEMORA (días)','DEADLINE','ATRASO S/I','OBSERVACIONES']
+};
+
+function mapComexToLive(r) {
+    const eg = getEstadoGeneral(r.ESTATUS_FINAL);
+    const ff = r.FECHA_FACTURA instanceof Date ? r.FECHA_FACTURA.toLocaleDateString('es-CL') : (r.FECHA_FACTURA || '');
+    return {
+        'ESTADO GENERAL': eg.label,
+        'DETALLE': r.ESTATUS_FINAL || '',
+        'DEMORA': r.DEMORA || 0,
+        'T. GESTIÓN': r.T_GESTIÓN != null ? r.T_GESTIÓN : '',
+        'N° PEDIDO': r.PEDIDO || '',
+        'SOLICITANTE': r.CLIENTE || '',
+        'RESPONSABLE': r.RESPONSABLE || '',
+        'FECHA FACTURA': ff,
+        'MOTIVO': r.MOTIVO || ''
+    };
+}
+
+function mapDUSToLive(r) {
+    const eg = getEstadoGeneral(r.ESTATUS_FINAL);
+    const dl = r.DEADLINE instanceof Date ? r.DEADLINE.toLocaleDateString('es-CL') : '';
+    return {
+        'ESTADO GENERAL': eg.label,
+        'DETALLE': r.ESTATUS_FINAL || '',
+        'N° PEDIDO': r.PEDIDO || '',
+        'CONSIGNATARIO': r.CONSIGNATARIO || '',
+        'RESPONSABLE': r.RESPONSABLE || '',
+        'FECHA FACTURA': r.FECHA_FACTURA || '',
+        'DEMORA (días)': r.DEMORA || 0,
+        'DEADLINE': dl,
+        'ATRASO S/I': r.DEMORA_SLA || 0,
+        'OBSERVACIONES': ''
+    };
+}
+
+async function publishLive(modulo) {
+    const btn = document.getElementById(modulo === 'COMEX' ? 'publish-comex-btn' : 'publish-dus-btn');
+    const origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i data-lucide="loader"></i> Publicando...';
+    lucide.createIcons();
+
+    try {
+        const source = modulo === 'COMEX' ? state.results : state.dusResults;
+        // Solo enviar pendientes (no procesados/legalizados)
+        const pending = source.filter(r => {
+            const eg = getEstadoGeneral(r.ESTATUS_FINAL);
+            return eg.label !== '✅ Procesado' && eg.label !== '✅ Legalizado';
+        });
+        const mapped = pending.map(r => modulo === 'COMEX' ? mapComexToLive(r) : mapDUSToLive(r));
+
+        await fetch(LIVE_API, {
+            method: 'POST',
+            mode: 'no-cors',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'publicar', modulo: modulo, data: mapped })
+        });
+
+        btn.innerHTML = '<i data-lucide="check"></i> ✅ Publicado!';
+        lucide.createIcons();
+        setTimeout(() => { btn.innerHTML = origText; btn.disabled = false; lucide.createIcons(); }, 3000);
+    } catch (err) {
+        console.error('Error publicando:', err);
+        btn.innerHTML = '<i data-lucide="alert-triangle"></i> Error';
+        lucide.createIcons();
+        setTimeout(() => { btn.innerHTML = origText; btn.disabled = false; lucide.createIcons(); }, 3000);
+    }
+}

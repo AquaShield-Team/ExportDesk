@@ -151,12 +151,31 @@
         .name-banner input:focus { border-color:var(--primary); }
         .name-banner label { font-size:0.85rem; color:var(--text-muted); white-space:nowrap; }
 
+        /* Filter chips */
+        .filters-bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px; align-items:center; }
+        .filter-group { display:flex; gap:4px; background:var(--glass-heavy); padding:3px; border-radius:10px;
+                        border:1px solid var(--glass-border); }
+        .filter-group-label { font-size:0.75rem; color:var(--text-muted); text-transform:uppercase;
+                              letter-spacing:0.5px; margin-right:4px; display:flex; align-items:center; padding-left:8px; }
+        .chip { padding:7px 16px; border-radius:8px; border:none; background:transparent; color:var(--text-muted);
+                cursor:pointer; font-size:0.8rem; font-weight:600; transition:all .2s; white-space:nowrap; }
+        .chip:hover { color:var(--text-main); background:rgba(255,255,255,0.04); }
+        .chip.active { color:#fff; }
+        .chip.active[data-val=""] { background:linear-gradient(135deg,var(--primary),var(--secondary)); }
+        .chip.active[data-val="congelado"] { background:linear-gradient(135deg,#38bdf8,#0ea5e9); }
+        .chip.active[data-val="fresco"] { background:linear-gradient(135deg,#4ade80,#22c55e); }
+        .chip.active[data-val="pendiente"] { background:linear-gradient(135deg,var(--red),#dc2626); }
+        .chip.active[data-val="facturacion"] { background:linear-gradient(135deg,var(--orange),#ea580c); }
+        .chip.active[data-val="todos-estado"] { background:linear-gradient(135deg,var(--primary),var(--secondary)); }
+        .chip .chip-count { font-size:0.7rem; opacity:0.7; margin-left:4px; }
+
         @media(max-width:768px) {
             .header { padding:12px 16px; flex-wrap:wrap; gap:8px; }
             main { padding:16px 12px 40px; }
             .stats { grid-template-columns:repeat(2,1fr); }
             .search-box { width:100%; }
             .table-header { flex-direction:column; gap:8px; }
+            .filters-bar { gap:6px; }
         }
     </style>
 </head>
@@ -191,6 +210,22 @@
             <button class="tab" data-mod="DUS" onclick="switchTab('DUS')">
                 <i data-lucide="file-text"></i> DUS <span class="count" id="count-dus">0</span>
             </button>
+        </div>
+
+        <!-- Filters -->
+        <div class="filters-bar" id="filters-bar">
+            <div class="filter-group">
+                <span class="filter-group-label">Equipo</span>
+                <button class="chip active" data-filter="grupo" data-val="" onclick="setFilter('grupo','')">👥 Todos</button>
+                <button class="chip" data-filter="grupo" data-val="congelado" onclick="setFilter('grupo','congelado')">❄️ Congelado <span class="chip-count" id="chip-congelado"></span></button>
+                <button class="chip" data-filter="grupo" data-val="fresco" onclick="setFilter('grupo','fresco')">🌿 Fresco <span class="chip-count" id="chip-fresco"></span></button>
+            </div>
+            <div class="filter-group">
+                <span class="filter-group-label">Estado</span>
+                <button class="chip active" data-filter="estado" data-val="todos-estado" onclick="setFilter('estado','todos-estado')">📋 Todos</button>
+                <button class="chip" data-filter="estado" data-val="pendiente" onclick="setFilter('estado','pendiente')">❌ Pendiente <span class="chip-count" id="chip-pendiente"></span></button>
+                <button class="chip" data-filter="estado" data-val="facturacion" onclick="setFilter('estado','facturacion')">📦 Pend. Facturación <span class="chip-count" id="chip-facturacion"></span></button>
+            </div>
         </div>
 
         <!-- Stats -->
@@ -243,6 +278,22 @@ const HEADERS = {
 
 let DATA = { comex:[], dus:[], notas_comex:[], notas_dus:[] };
 let currentMod = 'COMEX';
+let activeGrupo = '';       // '' = todos, 'congelado', 'fresco'
+let activeEstado = 'todos-estado'; // 'todos-estado', 'pendiente', 'facturacion'
+
+// ── Directorio de Analistas (grupo) ──
+const TEAM_DIR = {
+    'EMARTINEZG':  'congelado', 'GCHACANO':    'congelado', 'JOSANCHEZM':  'congelado',
+    'LCONEJEROSM': 'congelado', 'MIFIGUEROA':  'congelado', 'MNSOTO':      'congelado',
+    'MRAMIREZ':    'congelado', 'SNAGUIL':     'congelado', 'YVALERO':     'congelado',
+    'CZAMORANO':   'fresco',    'DPINCOL':     'fresco',    'ESILVAJ':     'fresco',
+    'SMOHOR':      'fresco',    'VVENEGAS':    'fresco'
+};
+
+function getGrupo(responsable) {
+    const code = String(responsable || '').toUpperCase().trim();
+    return TEAM_DIR[code] || null;
+}
 
 // ── Init ──
 document.addEventListener('DOMContentLoaded', () => {
@@ -270,6 +321,7 @@ async function loadAll() {
         document.getElementById('count-comex').textContent = DATA.comex.length;
         document.getElementById('count-dus').textContent = DATA.dus.length;
         document.getElementById('ts').textContent = 'Última actualización: ' + new Date().toLocaleString('es-CL');
+        updateFilterCounts();
         renderStats();
         renderTable();
     } catch(e) {
@@ -284,23 +336,70 @@ async function loadAll() {
 function switchTab(mod) {
     currentMod = mod;
     document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mod === mod));
+    updateFilterCounts();
     renderStats();
     renderTable();
 }
 
+// ── Filters ──
+function setFilter(type, val) {
+    if (type === 'grupo') activeGrupo = val;
+    if (type === 'estado') activeEstado = val;
+    document.querySelectorAll(`.chip[data-filter="${type}"]`).forEach(c =>
+        c.classList.toggle('active', c.dataset.val === val)
+    );
+    renderStats();
+    renderTable();
+}
+
+function applyFilters(rows) {
+    let out = rows;
+    if (activeGrupo) {
+        out = out.filter(r => getGrupo(r['RESPONSABLE']) === activeGrupo);
+    }
+    if (activeEstado === 'pendiente') {
+        out = out.filter(r => {
+            const eg = String(r['ESTADO GENERAL'] || '');
+            return eg.includes('Pendiente') && !eg.includes('Facturación');
+        });
+    } else if (activeEstado === 'facturacion') {
+        out = out.filter(r => String(r['DETALLE'] || '').includes('Facturación'));
+    }
+    return out;
+}
+
+function updateFilterCounts() {
+    const rows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const cong = rows.filter(r => getGrupo(r['RESPONSABLE']) === 'congelado').length;
+    const fres = rows.filter(r => getGrupo(r['RESPONSABLE']) === 'fresco').length;
+    const pend = rows.filter(r => {
+        const eg = String(r['ESTADO GENERAL'] || '');
+        return eg.includes('Pendiente') && !eg.includes('Facturación');
+    }).length;
+    const fact = rows.filter(r => String(r['DETALLE'] || '').includes('Facturación')).length;
+    document.getElementById('chip-congelado').textContent = cong ? `(${cong})` : '';
+    document.getElementById('chip-fresco').textContent = fres ? `(${fres})` : '';
+    document.getElementById('chip-pendiente').textContent = pend ? `(${pend})` : '';
+    document.getElementById('chip-facturacion').textContent = fact ? `(${fact})` : '';
+}
+
 // ── Stats ──
 function renderStats() {
-    const rows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const allRows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const rows = applyFilters(allRows);
     const notes = currentMod === 'COMEX' ? DATA.notas_comex : DATA.notas_dus;
     const bar = document.getElementById('stats-bar');
     const demoraKey = currentMod === 'COMEX' ? 'DEMORA' : 'DEMORA (días)';
     const criticos = rows.filter(r => parseInt(r[demoraKey]) >= 10).length;
-    const conNotas = new Set(notes.map(n => n['N° PEDIDO'])).size;
+    const pedidosVisible = new Set(rows.map(r => r['N° PEDIDO']));
+    const notasVisible = notes.filter(n => pedidosVisible.has(n['N° PEDIDO']));
+    const conNotas = new Set(notasVisible.map(n => n['N° PEDIDO'])).size;
+    const grupoLabel = activeGrupo ? ` (${activeGrupo.charAt(0).toUpperCase()+activeGrupo.slice(1)})` : '';
     bar.innerHTML = `
-        <div class="stat-card"><div class="stat-val">${rows.length}</div><div class="stat-label">Pendientes ${currentMod}</div></div>
+        <div class="stat-card"><div class="stat-val">${rows.length}</div><div class="stat-label">Pendientes ${currentMod}${grupoLabel}</div></div>
         <div class="stat-card"><div class="stat-val" style="color:var(--red)">${criticos}</div><div class="stat-label">Críticos (≥10 días)</div></div>
         <div class="stat-card"><div class="stat-val" style="color:var(--orange)">${conNotas}</div><div class="stat-label">Con observaciones</div></div>
-        <div class="stat-card"><div class="stat-val" style="color:var(--green)">${notes.length}</div><div class="stat-label">Notas totales</div></div>
+        <div class="stat-card"><div class="stat-val" style="color:var(--green)">${notasVisible.length}</div><div class="stat-label">Notas totales</div></div>
     `;
 }
 
@@ -308,10 +407,11 @@ function renderStats() {
 function esc(s) { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 
 function renderTable() {
-    const rows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const allRows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const afterFilters = applyFilters(allRows);
     const headers = HEADERS[currentMod];
     const q = document.getElementById('search').value.toLowerCase();
-    const filtered = q ? rows.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))) : rows;
+    const filtered = q ? afterFilters.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))) : afterFilters;
 
     const thead = document.getElementById('thead');
     const tbody = document.getElementById('tbody');

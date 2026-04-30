@@ -79,7 +79,10 @@
         .refresh-btn.loading i { animation:spin .8s linear infinite; }
         @keyframes spin { to{transform:rotate(360deg)} }
 
-        main { max-width:100%; margin:0 auto; padding:30px 32px 60px; }
+        main { max-width:100%; margin:0 auto; padding:30px 32px 60px; transition:opacity .25s ease; }
+        main.refreshing { opacity:0.15; }
+        .table-wrap.flash { animation:flash-border .6s ease; }
+        @keyframes flash-border { 0%{box-shadow:0 0 0 0 rgba(74,222,128,0.5)} 50%{box-shadow:0 0 20px 4px rgba(74,222,128,0.3)} 100%{box-shadow:none} }
 
         /* Tabs */
         .tabs { display:flex; gap:4px; margin-bottom:24px; background:var(--glass-heavy); padding:4px;
@@ -376,7 +379,9 @@ document.addEventListener('DOMContentLoaded', () => {
 // ── Fetch ──
 async function loadAll() {
     const btn = document.getElementById('refresh-btn');
+    const main = document.querySelector('main');
     btn.classList.add('loading');
+    main.classList.add('refreshing');
     try {
         const r = await fetch(API + '?action=todo');
         const j = await r.json();
@@ -391,10 +396,17 @@ async function loadAll() {
         updateFilterCounts();
         renderStats();
         renderTable();
+        // Visual flash on table
+        const tw = document.querySelector('.table-wrap');
+        tw.classList.remove('flash');
+        void tw.offsetWidth; // force reflow
+        tw.classList.add('flash');
     } catch(e) {
         console.error(e);
         document.getElementById('ts').textContent = '⚠️ Error al cargar: ' + e.message;
     }
+    // Fade content back in
+    setTimeout(() => main.classList.remove('refreshing'), 100);
     btn.classList.remove('loading');
     lucide.createIcons();
 }

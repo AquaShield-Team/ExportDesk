@@ -2161,6 +2161,13 @@ function exportToExcel() {
         const range = XLSX.utils.decode_range(ws['!ref']);
         
         // Colorear filas completas según ESTADO GENERAL (Columna A = 0)
+        // Para Auditoría: detectar columna DEMORA para semáforo de pendientes
+        let demoraColIdx = -1;
+        for (let C = range.s.c; C <= range.e.c; C++) {
+            const hCell = ws[XLSX.utils.encode_cell({c: C, r: 0})];
+            if (hCell && /^DEMORA$/i.test(String(hCell.v).trim())) { demoraColIdx = C; break; }
+        }
+
         for(let R = range.s.r + 1; R <= range.e.r; ++R) {
             const cellRef = XLSX.utils.encode_cell({c: 0, r: R});
             const cell = ws[cellRef];
@@ -2187,7 +2194,19 @@ function exportToExcel() {
             } else if (val.includes('Error') || val.includes('Anulado')) {
                 bgColor = "fecaca"; fontColor = "7f1d1d";
             } else if (val.includes('❌')) {
-                bgColor = "fee2e2"; fontColor = "991b1b";
+                // Semáforo por DEMORA: 0-5 verde, 6-9 naranja, 10+ rojo
+                let demora = 0;
+                if (demoraColIdx >= 0) {
+                    const dCell = ws[XLSX.utils.encode_cell({c: demoraColIdx, r: R})];
+                    if (dCell) demora = parseInt(dCell.v) || 0;
+                }
+                if (demora <= 5) {
+                    bgColor = "dcfce7"; fontColor = "166534"; // Verde
+                } else if (demora <= 9) {
+                    bgColor = "ffedd5"; fontColor = "9a3412"; // Naranja
+                } else {
+                    bgColor = "fee2e2"; fontColor = "991b1b"; // Rojo
+                }
             } else if (val.includes('🚚')) {
                 bgColor = "dbeafe"; fontColor = "1e40af";
             }
@@ -3159,19 +3178,141 @@ function toggleObsWidget() {
 // KPI ENGINE — Panel de Indicadores Clave
 // =============================================================
 
+// ── Configuración de Umbrales (persistida en localStorage) ──
+const SETTINGS_DEFAULTS = {
+    auditoria: {
+        demoraYellow: 3, demoraRed: 7,
+        slaYellow: 60,   slaRed: 85,
+        riesgo: 7,       criticos: 14,
+        tgestionYellow: 5, tgestionRed: 10
+    },
+    dus: {
+        demoraYellow: 10, demoraRed: 20,
+        slaYellow: 60,    slaRed: 85,
+        deadline: 8,      criticos: 14,
+        tgestionYellow: 20, tgestionRed: 35
+    }
+};
+
+function loadSettings() {
+    try {
+        const raw = localStorage.getItem('exportdesk_settings');
+        if (raw) {
+            const parsed = JSON.parse(raw);
+            // Merge con defaults para asegurar que no falte ninguna clave
+            return {
+                auditoria: { ...SETTINGS_DEFAULTS.auditoria, ...parsed.auditoria },
+                dus: { ...SETTINGS_DEFAULTS.dus, ...parsed.dus }
+            };
+        }
+    } catch (e) { console.warn('Error cargando settings:', e); }
+    return JSON.parse(JSON.stringify(SETTINGS_DEFAULTS));
+}
+
+function saveSettingsToStorage(cfg) {
+    try { localStorage.setItem('exportdesk_settings', JSON.stringify(cfg)); }
+    catch (e) { console.warn('Error guardando settings:', e); }
+}
+
+function getThresholds(module) {
+    const cfg = loadSettings();
+    return module === 'dus' ? cfg.dus : cfg.auditoria;
+}
+
+function openSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    if (!modal) return;
+    const cfg = loadSettings();
+    // Poblar inputs Auditoría
+    document.getElementById('cfg-aud-demora-yellow').value = cfg.auditoria.demoraYellow;
+    document.getElementById('cfg-aud-demora-red').value    = cfg.auditoria.demoraRed;
+    document.getElementById('cfg-aud-sla-yellow').value    = cfg.auditoria.slaYellow;
+    document.getElementById('cfg-aud-sla-red').value       = cfg.auditoria.slaRed;
+    document.getElementById('cfg-aud-riesgo').value        = cfg.auditoria.riesgo;
+    document.getElementById('cfg-aud-criticos').value      = cfg.auditoria.criticos;
+    document.getElementById('cfg-aud-tgestion-yellow').value = cfg.auditoria.tgestionYellow;
+    document.getElementById('cfg-aud-tgestion-red').value    = cfg.auditoria.tgestionRed;
+    // Poblar inputs DUS
+    document.getElementById('cfg-dus-demora-yellow').value = cfg.dus.demoraYellow;
+    document.getElementById('cfg-dus-demora-red').value    = cfg.dus.demoraRed;
+    document.getElementById('cfg-dus-sla-yellow').value    = cfg.dus.slaYellow;
+    document.getElementById('cfg-dus-sla-red').value       = cfg.dus.slaRed;
+    document.getElementById('cfg-dus-deadline').value      = cfg.dus.deadline;
+    document.getElementById('cfg-dus-criticos').value      = cfg.dus.criticos;
+    document.getElementById('cfg-dus-tgestion-yellow').value = cfg.dus.tgestionYellow;
+    document.getElementById('cfg-dus-tgestion-red').value    = cfg.dus.tgestionRed;
+    modal.style.display = 'flex';
+    if (window.lucide) lucide.createIcons();
+}
+
+function closeSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    if (modal) modal.style.display = 'none';
+}
+
+function switchSettingsTab(tabName, btn) {
+    document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.settings-tab-content').forEach(c => c.classList.remove('active'));
+    btn.classList.add('active');
+    const content = document.getElementById('settings-tab-' + tabName);
+    if (content) content.classList.add('active');
+}
+
+function saveSettings() {
+    const cfg = {
+        auditoria: {
+            demoraYellow:   parseInt(document.getElementById('cfg-aud-demora-yellow').value) || SETTINGS_DEFAULTS.auditoria.demoraYellow,
+            demoraRed:      parseInt(document.getElementById('cfg-aud-demora-red').value) || SETTINGS_DEFAULTS.auditoria.demoraRed,
+            slaYellow:      parseInt(document.getElementById('cfg-aud-sla-yellow').value) || SETTINGS_DEFAULTS.auditoria.slaYellow,
+            slaRed:         parseInt(document.getElementById('cfg-aud-sla-red').value) || SETTINGS_DEFAULTS.auditoria.slaRed,
+            riesgo:         parseInt(document.getElementById('cfg-aud-riesgo').value) || SETTINGS_DEFAULTS.auditoria.riesgo,
+            criticos:       parseInt(document.getElementById('cfg-aud-criticos').value) || SETTINGS_DEFAULTS.auditoria.criticos,
+            tgestionYellow: parseInt(document.getElementById('cfg-aud-tgestion-yellow').value) || SETTINGS_DEFAULTS.auditoria.tgestionYellow,
+            tgestionRed:    parseInt(document.getElementById('cfg-aud-tgestion-red').value) || SETTINGS_DEFAULTS.auditoria.tgestionRed
+        },
+        dus: {
+            demoraYellow:   parseInt(document.getElementById('cfg-dus-demora-yellow').value) || SETTINGS_DEFAULTS.dus.demoraYellow,
+            demoraRed:      parseInt(document.getElementById('cfg-dus-demora-red').value) || SETTINGS_DEFAULTS.dus.demoraRed,
+            slaYellow:      parseInt(document.getElementById('cfg-dus-sla-yellow').value) || SETTINGS_DEFAULTS.dus.slaYellow,
+            slaRed:         parseInt(document.getElementById('cfg-dus-sla-red').value) || SETTINGS_DEFAULTS.dus.slaRed,
+            deadline:       parseInt(document.getElementById('cfg-dus-deadline').value) || SETTINGS_DEFAULTS.dus.deadline,
+            criticos:       parseInt(document.getElementById('cfg-dus-criticos').value) || SETTINGS_DEFAULTS.dus.criticos,
+            tgestionYellow: parseInt(document.getElementById('cfg-dus-tgestion-yellow').value) || SETTINGS_DEFAULTS.dus.tgestionYellow,
+            tgestionRed:    parseInt(document.getElementById('cfg-dus-tgestion-red').value) || SETTINGS_DEFAULTS.dus.tgestionRed
+        }
+    };
+    saveSettingsToStorage(cfg);
+    closeSettingsModal();
+    // Re-renderizar KPIs si hay datos
+    const results = state.currentModule === 'dus' ? state.dusResults : state.results;
+    if (results && results.length > 0) renderKPIPanel(results);
+    // Feedback visual
+    const btn = document.getElementById('settings-btn');
+    if (btn) {
+        btn.style.borderColor = '#10b981';
+        setTimeout(() => { btn.style.borderColor = ''; }, 1500);
+    }
+}
+
+function resetSettingsDefaults() {
+    saveSettingsToStorage(JSON.parse(JSON.stringify(SETTINGS_DEFAULTS)));
+    openSettingsModal(); // recarga los inputs con defaults
+}
+
 /** Helper global: detecta si un ESTATUS_FINAL ya está "gestionado"
  *  (procesado, terrestre, legalizado, o validado manualmente) */
 function isGestionado(est) {
     return est.includes('Legalizado') || est.includes('✅') || est.includes('🚚') || est.includes('Terrestre') || est.includes('Validado Manualmente');
 }
 
-/** Calcula el deadline DUS: día 8 del mes siguiente a la fecha de factura */
+/** Calcula el deadline DUS: día configurable del mes siguiente a la fecha de factura */
 function calcularDeadlineDUS(fechaFactura) {
     if (!fechaFactura || !(fechaFactura instanceof Date) || isNaN(fechaFactura)) return null;
+    const cfg = getThresholds('dus');
     const y = fechaFactura.getFullYear();
     const m = fechaFactura.getMonth(); // 0-based
-    // Mes siguiente, día 8, medianoche
-    return new Date(y, m + 1, 8, 0, 0, 0, 0);
+    // Mes siguiente, día configurable (default 8), medianoche
+    return new Date(y, m + 1, cfg.deadline, 0, 0, 0, 0);
 }
 
 /** Calcula todos los KPIs a partir de los resultados actuales */
@@ -3226,16 +3367,17 @@ function calculateKPIs(results) {
         }
     }
 
-    // --- En Riesgo (>7 días, no gestionados) ---
+    // --- En Riesgo (configurable, no gestionados) ---
+    const th = getThresholds(isDUS ? 'dus' : 'auditoria');
     const enRiesgo = results.filter(r => {
         const d = parseInt(r.DEMORA) || 0;
-        return d > 7 && !isGestionado(r.ESTATUS_FINAL || '');
+        return d > th.riesgo && !isGestionado(r.ESTATUS_FINAL || '');
     }).length;
 
-    // --- Críticos (>14 días, no gestionados) ---
+    // --- Críticos (configurable, no gestionados) ---
     const criticos = results.filter(r => {
         const d = parseInt(r.DEMORA) || 0;
-        return d > 14 && !isGestionado(r.ESTATUS_FINAL || '');
+        return d > th.criticos && !isGestionado(r.ESTATUS_FINAL || '');
     }).length;
 
     // --- T. Gestión Promedio ---
@@ -3336,11 +3478,12 @@ function renderKPIPanel(results) {
     }
 
     const isDUS = state.currentModule === 'dus';
+    const th = getThresholds(isDUS ? 'dus' : 'auditoria');
 
     // 1. Demora Promedio
     const dp = kpis.demoraPromedio.toFixed(1);
     setCard('kpi-demora', dp + 'd',
-        kpis.demoraPromedio <= 3 ? 'kpi-green' : kpis.demoraPromedio <= 7 ? 'kpi-yellow' : 'kpi-red');
+        kpis.demoraPromedio <= th.demoraYellow ? 'kpi-green' : kpis.demoraPromedio <= th.demoraRed ? 'kpi-yellow' : 'kpi-red');
     const dpSub = document.getElementById('kpi-demora-sub');
     if (dpSub) dpSub.textContent = `${kpis.totalPendientes} pendientes`;
     const dpLabel = document.getElementById('kpi-demora')?.querySelector('.kpi-label');
@@ -3348,7 +3491,7 @@ function renderKPIPanel(results) {
 
     // 2. SLA %
     setCard('kpi-sla', kpis.slaPct + '%',
-        kpis.slaPct >= 85 ? 'kpi-green' : kpis.slaPct >= 60 ? 'kpi-yellow' : 'kpi-red');
+        kpis.slaPct >= th.slaRed ? 'kpi-green' : kpis.slaPct >= th.slaYellow ? 'kpi-yellow' : 'kpi-red');
     const slaSub = document.getElementById('kpi-sla-sub');
     const slaLabel = document.getElementById('kpi-sla')?.querySelector('.kpi-label');
     if (isDUS) {
@@ -3390,13 +3533,13 @@ function renderKPIPanel(results) {
         if (isDUS) {
             if (tgLabel) tgLabel.textContent = 'T. Total Prom.';
             setCard('kpi-tgestion', tg + 'd',
-                kpis.tGestionProm <= 20 ? 'kpi-green' : kpis.tGestionProm <= 35 ? 'kpi-yellow' : 'kpi-red');
+                kpis.tGestionProm <= th.tgestionYellow ? 'kpi-green' : kpis.tGestionProm <= th.tgestionRed ? 'kpi-yellow' : 'kpi-red');
             const tgSub = document.getElementById('kpi-tgestion-sub');
             if (tgSub) tgSub.textContent = 'Factura → Hoy';
         } else {
             if (tgLabel) tgLabel.textContent = 'T. Gestión Prom.';
             setCard('kpi-tgestion', tg + 'd',
-                kpis.tGestionProm <= 5 ? 'kpi-green' : kpis.tGestionProm <= 10 ? 'kpi-yellow' : 'kpi-red');
+                kpis.tGestionProm <= th.tgestionYellow ? 'kpi-green' : kpis.tGestionProm <= th.tgestionRed ? 'kpi-yellow' : 'kpi-red');
             const tgSub = document.getElementById('kpi-tgestion-sub');
             if (tgSub) tgSub.textContent = 'Factura → BL';
         }

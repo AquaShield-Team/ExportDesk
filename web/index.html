@@ -63,8 +63,135 @@
             <button id="team-btn" class="secondary-btn" title="Gestionar Equipo / Directorio SAP" style="margin-left:12px;">
                 <i data-lucide="users"></i> Equipo
             </button>
+            <button id="settings-btn" class="secondary-btn" title="Configuración de Umbrales" style="margin-left:8px;" onclick="openSettingsModal()">
+                <i data-lucide="settings"></i>
+            </button>
         </nav>
     </header>
+
+    <!-- ═══ Modal Configuración de Umbrales ═══ -->
+    <div id="settings-modal" class="overlay" style="display:none; z-index:10000;">
+        <div class="settings-modal-content glass">
+            <div class="settings-modal-header">
+                <h2><i data-lucide="sliders-horizontal"></i> Configuración de Umbrales</h2>
+                <button class="close-btn" onclick="closeSettingsModal()"><i data-lucide="x"></i></button>
+            </div>
+
+            <div class="settings-tabs">
+                <button class="settings-tab active" onclick="switchSettingsTab('auditoria', this)">
+                    <i data-lucide="file-check"></i> Auditoría (BL)
+                </button>
+                <button class="settings-tab" onclick="switchSettingsTab('dus', this)">
+                    <i data-lucide="landmark"></i> DUS
+                </button>
+            </div>
+
+            <!-- Tab Auditoría -->
+            <div id="settings-tab-auditoria" class="settings-tab-content active">
+                <table class="settings-table">
+                    <thead>
+                        <tr>
+                            <th>Indicador</th>
+                            <th colspan="2" class="th-yellow">Alerta Amarilla</th>
+                            <th colspan="2" class="th-red">Alerta Roja</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="setting-label">Demora Promedio</td>
+                            <td><input type="number" id="cfg-aud-demora-yellow" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                            <td><input type="number" id="cfg-aud-demora-red" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">SLA (%)</td>
+                            <td><input type="number" id="cfg-aud-sla-yellow" min="1" max="100"></td>
+                            <td class="unit">%</td>
+                            <td><input type="number" id="cfg-aud-sla-red" min="1" max="100"></td>
+                            <td class="unit">%</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">En Riesgo (días)</td>
+                            <td colspan="2" style="text-align:center; color:var(--muted);">—</td>
+                            <td><input type="number" id="cfg-aud-riesgo" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">Críticos (días)</td>
+                            <td colspan="2" style="text-align:center; color:var(--muted);">—</td>
+                            <td><input type="number" id="cfg-aud-criticos" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">T. Gestión</td>
+                            <td><input type="number" id="cfg-aud-tgestion-yellow" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                            <td><input type="number" id="cfg-aud-tgestion-red" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Tab DUS -->
+            <div id="settings-tab-dus" class="settings-tab-content">
+                <table class="settings-table">
+                    <thead>
+                        <tr>
+                            <th>Indicador</th>
+                            <th colspan="2" class="th-yellow">Alerta Amarilla</th>
+                            <th colspan="2" class="th-red">Alerta Roja</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td class="setting-label">Demora Promedio</td>
+                            <td><input type="number" id="cfg-dus-demora-yellow" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                            <td><input type="number" id="cfg-dus-demora-red" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">SLA (%)</td>
+                            <td><input type="number" id="cfg-dus-sla-yellow" min="1" max="100"></td>
+                            <td class="unit">%</td>
+                            <td><input type="number" id="cfg-dus-sla-red" min="1" max="100"></td>
+                            <td class="unit">%</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">Deadline DUS</td>
+                            <td colspan="2" style="text-align:center; color:var(--muted);">—</td>
+                            <td><input type="number" id="cfg-dus-deadline" min="1" max="28"></td>
+                            <td class="unit">Día</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">Críticos (días)</td>
+                            <td colspan="2" style="text-align:center; color:var(--muted);">—</td>
+                            <td><input type="number" id="cfg-dus-criticos" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                        </tr>
+                        <tr>
+                            <td class="setting-label">T. Total Prom.</td>
+                            <td><input type="number" id="cfg-dus-tgestion-yellow" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                            <td><input type="number" id="cfg-dus-tgestion-red" min="1" max="99"></td>
+                            <td class="unit">Días</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="settings-footer">
+                <button class="secondary-btn" onclick="resetSettingsDefaults()">
+                    <i data-lucide="rotate-ccw"></i> Restaurar Defaults
+                </button>
+                <button class="primary-btn" onclick="saveSettings()">
+                    <i data-lucide="save"></i> Guardar Cambios
+                </button>
+            </div>
+        </div>
+    </div>
 
     <main>
         <section id="hero">

@@ -63,6 +63,9 @@
             <button id="team-btn" class="secondary-btn" title="Gestionar Equipo / Directorio SAP" style="margin-left:12px;">
                 <i data-lucide="users"></i> Equipo
             </button>
+            <button id="notas-live-btn" class="secondary-btn" title="Ver notas del equipo en tiempo real" style="margin-left:8px;" onclick="openNotasLiveModal()">
+                <i data-lucide="message-square"></i> Notas Live
+            </button>
             <button id="settings-btn" class="secondary-btn" title="Configuración de Umbrales" style="margin-left:8px;" onclick="openSettingsModal()">
                 <i data-lucide="settings"></i>
             </button>
@@ -637,6 +640,24 @@
 
             <div class="modal-footer">
                 <span id="team-count" style="color:rgba(255,255,255,0.4); font-size:0.8rem;"></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ Modal Notas Live ═══ -->
+    <div id="notas-live-modal" class="overlay" style="display:none; z-index:10000;">
+        <div class="settings-modal-content glass" style="max-width:700px;">
+            <div class="settings-modal-header">
+                <h2><i data-lucide="message-square"></i> Notas del Equipo (Live)</h2>
+                <button class="close-btn" onclick="closeNotasLiveModal()"><i data-lucide="x"></i></button>
+            </div>
+            <div style="padding:20px;">
+                <div style="display:flex; gap:8px; margin-bottom:16px;">
+                    <button class="secondary-btn" id="nl-tab-comex" onclick="switchNotasTab('COMEX')" style="flex:1;">📋 COMEX <span id="nl-count-comex"></span></button>
+                    <button class="secondary-btn" id="nl-tab-dus" onclick="switchNotasTab('DUS')" style="flex:1;">📄 DUS <span id="nl-count-dus"></span></button>
+                </div>
+                <div id="notas-live-list" style="max-height:400px; overflow-y:auto;"></div>
+                <p id="notas-live-ts" style="text-align:center; color:rgba(255,255,255,0.3); font-size:0.75rem; margin-top:12px;"></p>
             </div>
         </div>
     </div>

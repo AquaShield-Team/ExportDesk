@@ -274,7 +274,7 @@ const API = 'https://script.google.com/macros/s/AKfycbwG82WPhlVyhcleKd5zUQPxGQa_
 
 const HEADERS = {
     COMEX: ['ESTADO GENERAL','DETALLE','DEMORA','T. GESTIÓN','N° PEDIDO','SOLICITANTE','RESPONSABLE','FECHA FACTURA','MOTIVO'],
-    DUS:   ['ESTADO GENERAL','DETALLE','N° PEDIDO','CONSIGNATARIO','RESPONSABLE','FECHA FACTURA','DEMORA (días)','DEADLINE','ATRASO S/I','OBSERVACIONES']
+    DUS:   ['ESTADO GENERAL','DETALLE','N° PEDIDO','CONSIGNATARIO','RESPONSABLE','FECHA FACTURA','DEMORA (días)','DEADLINE']
 };
 
 let DATA = { comex:[], dus:[], notas_comex:[], notas_dus:[] };
@@ -423,8 +423,8 @@ function renderTable() {
     const COL_W = {
         COMEX: { 'ESTADO GENERAL':'100px','DETALLE':'130px','DEMORA':'70px','T. GESTIÓN':'70px',
                  'N° PEDIDO':'100px','SOLICITANTE':'auto','RESPONSABLE':'110px','FECHA FACTURA':'100px','MOTIVO':'auto' },
-        DUS:   { 'ESTADO GENERAL':'95px','DETALLE':'140px','N° PEDIDO':'95px','CONSIGNATARIO':'auto',
-                 'RESPONSABLE':'100px','FECHA FACTURA':'95px','DEMORA (días)':'65px','DEADLINE':'90px','ATRASO S/I':'60px','OBSERVACIONES':'auto' }
+        DUS:   { 'ESTADO GENERAL':'100px','DETALLE':'150px','N° PEDIDO':'100px','CONSIGNATARIO':'auto',
+                 'RESPONSABLE':'110px','FECHA FACTURA':'100px','DEMORA (días)':'75px','DEADLINE':'100px' }
     };
     const widths = COL_W[currentMod] || {};
     const wrapCols = new Set(['SOLICITANTE','CONSIGNATARIO','MOTIVO','OBSERVACIONES','DETALLE']);

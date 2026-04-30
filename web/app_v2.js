@@ -3864,3 +3864,69 @@ async function publishLive(modulo) {
         setTimeout(() => { btn.innerHTML = origText; btn.disabled = false; lucide.createIcons(); }, 3000);
     }
 }
+
+// ═══════════════════════════════════════════
+// Notas Live — Ver notas del equipo
+// ═══════════════════════════════════════════
+let notasLiveData = { comex: [], dus: [] };
+let notasLiveTab = 'COMEX';
+
+async function openNotasLiveModal() {
+    document.getElementById('notas-live-modal').style.display = 'flex';
+    document.getElementById('notas-live-list').innerHTML = '<p style="text-align:center;color:rgba(255,255,255,0.4);padding:30px;">Cargando notas...</p>';
+    try {
+        const r = await fetch(LIVE_API + '?action=todo');
+        const j = await r.json();
+        if (!j.ok) throw new Error(j.error);
+        notasLiveData.comex = j.notas_comex?.data || [];
+        notasLiveData.dus = j.notas_dus?.data || [];
+        document.getElementById('nl-count-comex').textContent = `(${notasLiveData.comex.length})`;
+        document.getElementById('nl-count-dus').textContent = `(${notasLiveData.dus.length})`;
+        document.getElementById('notas-live-ts').textContent = 'Actualizado: ' + new Date().toLocaleString('es-CL');
+        renderNotasLive();
+    } catch (e) {
+        document.getElementById('notas-live-list').innerHTML = `<p style="text-align:center;color:#f87171;padding:20px;">Error: ${e.message}</p>`;
+    }
+    lucide.createIcons();
+}
+
+function closeNotasLiveModal() {
+    document.getElementById('notas-live-modal').style.display = 'none';
+}
+
+function switchNotasTab(tab) {
+    notasLiveTab = tab;
+    document.getElementById('nl-tab-comex').style.borderColor = tab === 'COMEX' ? '#00d2ff' : '';
+    document.getElementById('nl-tab-comex').style.color = tab === 'COMEX' ? '#00d2ff' : '';
+    document.getElementById('nl-tab-dus').style.borderColor = tab === 'DUS' ? '#00d2ff' : '';
+    document.getElementById('nl-tab-dus').style.color = tab === 'DUS' ? '#00d2ff' : '';
+    renderNotasLive();
+}
+
+function renderNotasLive() {
+    const notes = notasLiveTab === 'COMEX' ? notasLiveData.comex : notasLiveData.dus;
+    const list = document.getElementById('notas-live-list');
+    if (notes.length === 0) {
+        list.innerHTML = '<p style="text-align:center;color:rgba(255,255,255,0.3);padding:30px;">Sin notas en ' + notasLiveTab + '</p>';
+        return;
+    }
+    // Group by pedido
+    const grouped = {};
+    notes.forEach(n => {
+        const ped = n['N° PEDIDO'] || 'Sin pedido';
+        if (!grouped[ped]) grouped[ped] = [];
+        grouped[ped].push(n);
+    });
+    list.innerHTML = Object.entries(grouped).map(([ped, arr]) => `
+        <div style="margin-bottom:14px; background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.08); border-radius:10px; padding:14px;">
+            <div style="font-weight:700; font-size:0.9rem; margin-bottom:8px; color:#00d2ff;">📌 Pedido ${escHtml(ped)}</div>
+            ${arr.map(n => `
+                <div style="padding:6px 0; border-top:1px solid rgba(255,255,255,0.04);">
+                    <span style="font-weight:600; font-size:0.82rem;">${escHtml(n['AUTOR'] || 'Anónimo')}</span>
+                    <span style="float:right; font-size:0.7rem; color:rgba(255,255,255,0.3);">${new Date(n['FECHA']).toLocaleString('es-CL')}</span>
+                    <p style="font-size:0.82rem; margin-top:4px; color:rgba(255,255,255,0.8);">${escHtml(n['NOTA'] || '')}</p>
+                </div>
+            `).join('')}
+        </div>
+    `).join('');
+}

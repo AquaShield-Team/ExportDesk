@@ -14,6 +14,23 @@
  *   M-05: procesarDUS() solo se ejecuta si hay datos DUS cargados
  */
 
+// ═══ Theme Toggle ═══
+function toggleTheme() {
+    const isLight = document.body.classList.toggle('light-mode');
+    localStorage.setItem('edx_theme', isLight ? 'light' : 'dark');
+    document.getElementById('theme-btn').textContent = isLight ? '☀️' : '🌙';
+}
+// Auto-restore theme on load
+(function() {
+    if (localStorage.getItem('edx_theme') === 'light') {
+        document.body.classList.add('light-mode');
+        document.addEventListener('DOMContentLoaded', () => {
+            const btn = document.getElementById('theme-btn');
+            if (btn) btn.textContent = '☀️';
+        });
+    }
+})();
+
 const state = {
     sap: null,
     bls: [],

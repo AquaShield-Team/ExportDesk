@@ -3800,7 +3800,12 @@ const LIVE_HEADERS = {
 
 function mapComexToLive(r) {
     const eg = getEstadoGeneral(r.ESTATUS_FINAL);
-    const ff = r.FECHA_FACTURA instanceof Date ? r.FECHA_FACTURA.toLocaleDateString('es-CL') : (r.FECHA_FACTURA || '');
+    let ff = '';
+    if (r.FECHA_FACTURA instanceof Date && !isNaN(r.FECHA_FACTURA)) {
+        ff = r.FECHA_FACTURA.toLocaleDateString('es-CL');
+    } else if (r.FECHA_FACTURA) {
+        ff = String(r.FECHA_FACTURA);
+    }
     return {
         'ESTADO GENERAL': eg.label,
         'DETALLE': r.ESTATUS_FINAL || '',

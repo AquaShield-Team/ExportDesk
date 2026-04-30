@@ -273,7 +273,7 @@
 const API = 'https://script.google.com/macros/s/AKfycbwG82WPhlVyhcleKd5zUQPxGQa_teAXEX4NVifB0Yc6qufeEEuTDpBsri0HfZX4-QVTRQ/exec';
 
 const HEADERS = {
-    COMEX: ['ESTADO GENERAL','DETALLE','DEMORA','T. GESTIÓN','N° PEDIDO','SOLICITANTE','RESPONSABLE','FECHA FACTURA','MOTIVO'],
+    COMEX: ['ESTADO GENERAL','DETALLE','DEMORA','T. GESTIÓN','N° PEDIDO','SOLICITANTE','RESPONSABLE','FECHA FACTURA'],
     DUS:   ['ESTADO GENERAL','DETALLE','N° PEDIDO','CONSIGNATARIO','RESPONSABLE','FECHA FACTURA','DEMORA (días)','DEADLINE']
 };
 
@@ -421,8 +421,8 @@ function renderTable() {
 
     // Column widths for fixed layout
     const COL_W = {
-        COMEX: { 'ESTADO GENERAL':'100px','DETALLE':'130px','DEMORA':'70px','T. GESTIÓN':'70px',
-                 'N° PEDIDO':'100px','SOLICITANTE':'auto','RESPONSABLE':'110px','FECHA FACTURA':'100px','MOTIVO':'auto' },
+        COMEX: { 'ESTADO GENERAL':'100px','DETALLE':'140px','DEMORA':'70px','T. GESTIÓN':'75px',
+                 'N° PEDIDO':'100px','SOLICITANTE':'auto','RESPONSABLE':'120px','FECHA FACTURA':'110px' },
         DUS:   { 'ESTADO GENERAL':'100px','DETALLE':'150px','N° PEDIDO':'100px','CONSIGNATARIO':'auto',
                  'RESPONSABLE':'110px','FECHA FACTURA':'100px','DEMORA (días)':'75px','DEADLINE':'100px' }
     };

@@ -53,7 +53,7 @@
         .refresh-btn.loading i { animation:spin .8s linear infinite; }
         @keyframes spin { to{transform:rotate(360deg)} }
 
-        main { max-width:1600px; margin:0 auto; padding:30px 20px 60px; }
+        main { max-width:100%; margin:0 auto; padding:30px 32px 60px; }
 
         /* Tabs */
         .tabs { display:flex; gap:4px; margin-bottom:24px; background:var(--glass-heavy); padding:4px;
@@ -82,13 +82,34 @@
         .search-box { background:var(--glass-heavy); border:1px solid var(--glass-border); border-radius:8px;
                       padding:6px 12px; color:var(--text-main); font-size:0.85rem; width:240px; outline:none; }
         .search-box:focus { border-color:var(--primary); }
-        table { width:100%; border-collapse:collapse; table-layout:fixed; }
-        thead th { position:sticky; top:0; background:rgba(10,10,11,0.9); padding:10px 10px; text-align:left;
+        table { width:100%; border-collapse:collapse; }
+        thead th { position:sticky; top:0; background:rgba(10,10,11,0.95); padding:10px 10px; text-align:left;
                    font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);
-                   border-bottom:1px solid var(--glass-border); white-space:nowrap; }
+                   border-bottom:1px solid var(--glass-border); white-space:nowrap; cursor:default; }
         tbody td { padding:8px 10px; font-size:0.82rem; border-bottom:1px solid rgba(255,255,255,0.03);
-                   max-width:180px; overflow:hidden; text-overflow:ellipsis; }
-        tbody td.wrap { white-space:normal; word-break:break-word; }
+                   white-space:nowrap; max-width:280px; overflow:hidden; text-overflow:ellipsis; }
+        tbody td.wrap { white-space:normal; word-break:break-word; max-width:260px; }
+
+        /* Column filter dropdowns */
+        .col-filter { position:relative; display:inline-block; }
+        .col-filter-btn { background:none; border:none; color:var(--text-muted); cursor:pointer;
+                          font-size:0.65rem; margin-left:4px; vertical-align:middle; opacity:0.5; transition:opacity .2s; }
+        .col-filter-btn:hover, .col-filter-btn.active { opacity:1; color:var(--primary); }
+        .col-filter-dd { display:none; position:absolute; top:100%; left:0; z-index:200;
+                         background:#1a1a1e; border:1px solid var(--glass-border); border-radius:8px;
+                         min-width:160px; max-height:220px; overflow-y:auto; box-shadow:0 8px 24px rgba(0,0,0,.5);
+                         padding:4px 0; margin-top:4px; }
+        .col-filter-dd.show { display:block; }
+        .col-filter-dd label { display:flex; align-items:center; gap:6px; padding:6px 12px; font-size:0.78rem;
+                               color:var(--text-main); cursor:pointer; transition:background .1s; }
+        .col-filter-dd label:hover { background:rgba(255,255,255,0.05); }
+        .col-filter-dd input[type=checkbox] { accent-color:var(--primary); }
+
+        /* Download btn */
+        .dl-btn { background:var(--glass-heavy); border:1px solid var(--glass-border); color:var(--text-muted);
+                  padding:6px 14px; border-radius:8px; cursor:pointer; font-size:0.8rem; display:flex;
+                  align-items:center; gap:6px; transition:all .2s; white-space:nowrap; }
+        .dl-btn:hover { border-color:var(--green); color:var(--green); }
         tbody tr { transition:background .15s; }
         tbody tr:hover { background:rgba(0,210,255,0.04); }
         .badge { padding:3px 10px; border-radius:6px; font-size:0.75rem; font-weight:600; }
@@ -236,7 +257,10 @@
         <div class="table-wrap">
             <div class="table-header">
                 <h2 id="table-title"><i data-lucide="list"></i> Pendientes</h2>
-                <input class="search-box" id="search" type="text" placeholder="Buscar pedido, cliente..." oninput="renderTable()">
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <button class="dl-btn" onclick="downloadCSV()" title="Descargar con notas"><i data-lucide="download"></i> Descargar</button>
+                    <input class="search-box" id="search" type="text" placeholder="Buscar pedido, cliente..." oninput="renderTable()">
+                </div>
             </div>
             <div style="overflow-x:auto;">
                 <table><thead id="thead"></thead><tbody id="tbody"></tbody></table>
@@ -407,11 +431,20 @@ function renderStats() {
 // ── Table ──
 function esc(s) { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
 
+// Column filter state: { 'RESPONSABLE': Set(['SNAGUIL','MRAMIREZ']), ... }
+let colFilters = {};
+
 function renderTable() {
     const allRows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
-    const afterFilters = applyFilters(allRows);
+    let afterFilters = applyFilters(allRows);
     const headers = HEADERS[currentMod];
     const q = document.getElementById('search').value.toLowerCase();
+
+    // Apply column filters
+    Object.entries(colFilters).forEach(([col, vals]) => {
+        if (vals.size > 0) afterFilters = afterFilters.filter(r => vals.has(String(r[col] || '')));
+    });
+
     const filtered = q ? afterFilters.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))) : afterFilters;
 
     const thead = document.getElementById('thead');
@@ -419,20 +452,17 @@ function renderTable() {
     const empty = document.getElementById('empty');
     document.getElementById('table-title').innerHTML = `<i data-lucide="list"></i> Pendientes ${currentMod} (${filtered.length})`;
 
-    // Column widths for fixed layout
-    const COL_W = {
-        COMEX: { 'ESTADO GENERAL':'100px','DETALLE':'140px','DEMORA':'70px','T. GESTIÓN':'75px',
-                 'N° PEDIDO':'100px','SOLICITANTE':'auto','RESPONSABLE':'120px','FECHA FACTURA':'110px' },
-        DUS:   { 'ESTADO GENERAL':'100px','DETALLE':'150px','N° PEDIDO':'100px','CONSIGNATARIO':'auto',
-                 'RESPONSABLE':'110px','FECHA FACTURA':'100px','DEMORA (días)':'75px','DEADLINE':'100px' }
-    };
-    const widths = COL_W[currentMod] || {};
-    const wrapCols = new Set(['SOLICITANTE','CONSIGNATARIO','MOTIVO','OBSERVACIONES','DETALLE']);
+    const wrapCols = new Set(['SOLICITANTE','CONSIGNATARIO','DETALLE']);
 
+    // Build header with filter buttons
     thead.innerHTML = '<tr>' + headers.map(h => {
-        const w = widths[h] || 'auto';
-        return `<th style="width:${w}">${esc(h)}</th>`;
-    }).join('') + '<th style="width:70px">Notas</th></tr>';
+        const filterable = ['RESPONSABLE','DETALLE','CONSIGNATARIO','SOLICITANTE','ESTADO GENERAL'].includes(h);
+        const hasFilter = colFilters[h] && colFilters[h].size > 0;
+        const filterBtn = filterable
+            ? `<button class="col-filter-btn${hasFilter?' active':''}" onclick="toggleColFilter(event,'${h}')" title="Filtrar">▼</button>`
+            : '';
+        return `<th>${esc(h)}${filterBtn}</th>`;
+    }).join('') + '<th>Notas</th></tr>';
 
     if (filtered.length === 0) {
         tbody.innerHTML = '';
@@ -467,6 +497,72 @@ function renderTable() {
         }).join('');
     }
     lucide.createIcons();
+}
+
+// ── Column filter dropdown ──
+function toggleColFilter(e, col) {
+    e.stopPropagation();
+    // Close any open
+    document.querySelectorAll('.col-filter-dd.show').forEach(d => d.remove());
+    const th = e.target.closest('th');
+    const allRows = applyFilters(currentMod === 'COMEX' ? DATA.comex : DATA.dus);
+    const uniqueVals = [...new Set(allRows.map(r => String(r[col] || '')))].sort();
+    const selected = colFilters[col] || new Set();
+
+    const dd = document.createElement('div');
+    dd.className = 'col-filter-dd show';
+    dd.innerHTML = `<label style="border-bottom:1px solid rgba(255,255,255,0.06);padding:8px 12px;font-weight:600;font-size:0.72rem;color:var(--primary);cursor:pointer;">
+        <input type="checkbox" ${selected.size===0?'checked':''} onchange="clearColFilter('${col}')" /> Todos (${uniqueVals.length})
+    </label>` + uniqueVals.map(v => `<label><input type="checkbox" ${selected.has(v)?'checked':''}
+        onchange="toggleColVal('${col}',this.checked,'${v.replace(/'/g,"\\'")}')" /> ${esc(v) || '(vacío)'}</label>`).join('');
+    th.style.position = 'relative';
+    th.appendChild(dd);
+
+    // Close on outside click
+    setTimeout(() => document.addEventListener('click', function close(ev) {
+        if (!dd.contains(ev.target)) { dd.remove(); document.removeEventListener('click', close); }
+    }), 10);
+}
+
+function toggleColVal(col, checked, val) {
+    if (!colFilters[col]) colFilters[col] = new Set();
+    if (checked) colFilters[col].add(val); else colFilters[col].delete(val);
+    renderTable();
+}
+
+function clearColFilter(col) {
+    delete colFilters[col];
+    document.querySelectorAll('.col-filter-dd.show').forEach(d => d.remove());
+    renderTable();
+}
+
+// ── Download CSV with notes ──
+function downloadCSV() {
+    const allRows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
+    const rows = applyFilters(allRows);
+    const headers = HEADERS[currentMod];
+    const notesArr = currentMod === 'COMEX' ? DATA.notas_comex : DATA.notas_dus;
+    const csvHeaders = [...headers, 'NOTAS EQUIPO'];
+
+    const csvRows = rows.map(r => {
+        const pedido = r['N° PEDIDO'] || '';
+        const notes = notesArr.filter(n => String(n['N° PEDIDO']) === String(pedido))
+            .map(n => `[${n['AUTOR']}] ${n['NOTA']}`).join(' | ');
+        return csvHeaders.map(h => {
+            const val = h === 'NOTAS EQUIPO' ? notes : String(r[h] || '');
+            return '"' + val.replace(/"/g, '""') + '"';
+        }).join(',');
+    });
+
+    const bom = '\uFEFF';
+    const csv = bom + csvHeaders.join(',') + '\n' + csvRows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Pendientes_${currentMod}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
 }
 
 // ── Modal ──

@@ -1,0 +1,649 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AQUASHIELD · ExportDesk | Observaciones del Equipo</title>
+    <meta name="description" content="Canal de observaciones y feedback para el equipo ExportDesk.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <script src="https://unpkg.com/lucide@0.344.0"></script>
+    <style>
+        :root {
+            --bg: #0a0e1a;
+            --surface: #111827;
+            --surface2: #1a2236;
+            --border: rgba(255,255,255,0.08);
+            --text: #e2e8f0;
+            --muted: #64748b;
+            --primary: #0ea5e9;
+            --primary-glow: rgba(14,165,233,0.15);
+            --green: #10b981;
+            --yellow: #f59e0b;
+            --red: #ef4444;
+            --orange: #f97316;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: 'Inter', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        /* Header */
+        header {
+            backdrop-filter: blur(20px);
+            background: rgba(17,24,39,0.85);
+            border-bottom: 1px solid var(--border);
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.95rem;
+            color: var(--muted);
+        }
+        .logo-icon {
+            width: 32px; height: 32px;
+            background: linear-gradient(135deg, var(--primary), #6366f1);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+        }
+        .logo strong { color: var(--text); }
+        .back-btn {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: var(--muted);
+            text-decoration: none;
+            font-size: 0.85rem;
+            padding: 8px 14px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            transition: all 0.2s;
+        }
+        .back-btn:hover {
+            color: var(--text);
+            border-color: var(--primary);
+            background: var(--primary-glow);
+        }
+
+        /* Main */
+        main {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 32px 20px 60px;
+        }
+
+        .page-title {
+            text-align: center;
+            margin-bottom: 32px;
+        }
+        .page-title h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            background: linear-gradient(135deg, var(--primary), #a78bfa);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .page-title p {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        /* Form Card */
+        .form-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 28px;
+            margin-bottom: 28px;
+        }
+        .form-card h2 {
+            font-size: 1rem;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text);
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 16px;
+        }
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .form-group.full { grid-column: 1 / -1; }
+
+        label {
+            font-size: 0.8rem;
+            font-weight: 500;
+            color: var(--muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        input, select, textarea {
+            padding: 10px 14px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: var(--surface2);
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
+            font-size: 0.9rem;
+            transition: border-color 0.2s;
+            outline: none;
+        }
+        input:focus, select:focus, textarea:focus {
+            border-color: var(--primary);
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        select {
+            cursor: pointer;
+            -webkit-appearance: none;
+        }
+
+        .priority-pills {
+            display: flex;
+            gap: 8px;
+        }
+        .priority-pill {
+            flex: 1;
+            padding: 8px 12px;
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 0.82rem;
+            font-weight: 500;
+            text-align: center;
+            transition: all 0.2s;
+            font-family: 'Inter', sans-serif;
+        }
+        .priority-pill:hover { background: rgba(255,255,255,0.04); }
+        .priority-pill.active-low {
+            border-color: var(--green); color: var(--green);
+            background: rgba(16,185,129,0.1);
+        }
+        .priority-pill.active-med {
+            border-color: var(--yellow); color: var(--yellow);
+            background: rgba(245,158,11,0.1);
+        }
+        .priority-pill.active-high {
+            border-color: var(--red); color: var(--red);
+            background: rgba(239,68,68,0.1);
+        }
+
+        .submit-btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(135deg, var(--primary), #6366f1);
+            color: white;
+            font-size: 0.95rem;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            transition: all 0.25s;
+            font-family: 'Inter', sans-serif;
+            margin-top: 8px;
+        }
+        .submit-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(14,165,233,0.3);
+        }
+        .submit-btn:active { transform: translateY(0); }
+
+        /* Success Toast */
+        .toast {
+            position: fixed;
+            bottom: 24px;
+            right: 24px;
+            background: var(--green);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-weight: 600;
+            font-size: 0.88rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 8px 30px rgba(16,185,129,0.3);
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 999;
+        }
+        .toast.show { transform: translateY(0); opacity: 1; }
+
+        /* Observation List */
+        .obs-list-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+        .obs-list-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border);
+        }
+        .obs-list-header h2 {
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .obs-count {
+            background: var(--primary-glow);
+            color: var(--primary);
+            padding: 2px 10px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 600;
+        }
+        .export-btn {
+            padding: 6px 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            background: transparent;
+            color: var(--muted);
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+        .export-btn:hover {
+            color: var(--green);
+            border-color: var(--green);
+        }
+
+        .obs-empty {
+            padding: 48px 24px;
+            text-align: center;
+            color: var(--muted);
+        }
+        .obs-empty i { margin-bottom: 12px; opacity: 0.4; }
+
+        .obs-item {
+            padding: 16px 24px;
+            border-bottom: 1px solid rgba(255,255,255,0.03);
+            transition: background 0.15s;
+        }
+        .obs-item:hover { background: rgba(255,255,255,0.02); }
+        .obs-item:last-child { border-bottom: none; }
+
+        .obs-item-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+        .obs-meta {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.82rem;
+        }
+        .obs-author {
+            font-weight: 600;
+            color: var(--text);
+        }
+        .obs-module {
+            padding: 2px 8px;
+            border-radius: 6px;
+            font-size: 0.72rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        .obs-module.bl { background: rgba(14,165,233,0.15); color: var(--primary); }
+        .obs-module.dus { background: rgba(168,85,247,0.15); color: #a855f7; }
+        .obs-module.general { background: rgba(100,116,139,0.2); color: var(--muted); }
+
+        .obs-priority {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            flex-shrink: 0;
+        }
+        .obs-priority.baja { background: var(--green); }
+        .obs-priority.media { background: var(--yellow); }
+        .obs-priority.alta { background: var(--red); }
+
+        .obs-date {
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+        .obs-text {
+            font-size: 0.88rem;
+            color: var(--text);
+            line-height: 1.5;
+            opacity: 0.9;
+        }
+        .obs-delete {
+            background: none;
+            border: none;
+            color: var(--muted);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            opacity: 0;
+            transition: all 0.2s;
+        }
+        .obs-item:hover .obs-delete { opacity: 1; }
+        .obs-delete:hover { color: var(--red); background: rgba(239,68,68,0.1); }
+
+        /* Responsive */
+        @media (max-width: 600px) {
+            .form-row { grid-template-columns: 1fr; }
+            header { padding: 12px 16px; }
+            main { padding: 20px 12px 40px; }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            <span class="logo-icon"><i data-lucide="shield-check" style="width:18px;height:18px;"></i></span>
+            <span>AQUASHIELD <strong>· ExportDesk</strong></span>
+        </div>
+        <a href="index.html" class="back-btn">
+            <i data-lucide="arrow-left" style="width:16px;height:16px;"></i> Volver al Dashboard
+        </a>
+    </header>
+
+    <main>
+        <div class="page-title">
+            <h1>📝 Observaciones del Equipo</h1>
+            <p>Registra sugerencias, errores o mejoras para ExportDesk</p>
+        </div>
+
+        <!-- Form -->
+        <div class="form-card">
+            <h2><i data-lucide="message-square-plus" style="width:18px;height:18px;"></i> Nueva Observación</h2>
+            <form id="obs-form" onsubmit="return submitObs(event)">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="obs-name">Tu Nombre</label>
+                        <input type="text" id="obs-name" placeholder="Ej: María López" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="obs-modulo">Módulo</label>
+                        <select id="obs-modulo">
+                            <option value="General">General</option>
+                            <option value="BL">Auditoría (BL)</option>
+                            <option value="DUS">DUS</option>
+                            <option value="KPI">KPI / Reportes</option>
+                            <option value="UI">Interfaz / Diseño</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group full" style="margin-bottom:16px;">
+                    <label for="obs-tipo">Tipo</label>
+                    <select id="obs-tipo">
+                        <option value="Mejora">💡 Sugerencia de Mejora</option>
+                        <option value="Error">🐛 Reporte de Error</option>
+                        <option value="Duda">❓ Duda / Consulta</option>
+                        <option value="Otro">📌 Otro</option>
+                    </select>
+                </div>
+                <div class="form-group full" style="margin-bottom:16px;">
+                    <label>Prioridad</label>
+                    <div class="priority-pills">
+                        <button type="button" class="priority-pill active-low" data-priority="Baja" onclick="setPriority(this)">🟢 Baja</button>
+                        <button type="button" class="priority-pill" data-priority="Media" onclick="setPriority(this)">🟡 Media</button>
+                        <button type="button" class="priority-pill" data-priority="Alta" onclick="setPriority(this)">🔴 Alta</button>
+                    </div>
+                </div>
+                <div class="form-group full" style="margin-bottom:8px;">
+                    <label for="obs-text">Descripción</label>
+                    <textarea id="obs-text" placeholder="Describe la observación con el mayor detalle posible..." required></textarea>
+                </div>
+                <button type="submit" class="submit-btn">
+                    <i data-lucide="send" style="width:18px;height:18px;"></i> Enviar Observación
+                </button>
+            </form>
+        </div>
+
+        <!-- List -->
+        <div class="obs-list-card">
+            <div class="obs-list-header">
+                <h2>
+                    <i data-lucide="list" style="width:18px;height:18px;"></i> Historial
+                    <span id="obs-counter" class="obs-count">0</span>
+                </h2>
+                <button class="export-btn" onclick="exportObsExcel()">
+                    <i data-lucide="download" style="width:14px;height:14px;"></i> Exportar
+                </button>
+            </div>
+            <div id="obs-list-body">
+                <div class="obs-empty">
+                    <i data-lucide="inbox" style="width:40px;height:40px;"></i>
+                    <p>Aún no hay observaciones registradas.</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <div id="toast" class="toast">
+        <i data-lucide="check-circle" style="width:18px;height:18px;"></i>
+        <span>Observación registrada correctamente</span>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/xlsx-js-style@1.2.0/dist/xlsx.bundle.js"></script>
+    <script>
+        // ── Estado ──
+        const STORAGE_KEY = 'exportdesk_observaciones';
+        let selectedPriority = 'Baja';
+
+        function loadObs() {
+            try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
+            catch { return []; }
+        }
+
+        function saveObs(list) {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
+        }
+
+        // ── Prioridad ──
+        function setPriority(btn) {
+            document.querySelectorAll('.priority-pill').forEach(p => {
+                p.classList.remove('active-low', 'active-med', 'active-high');
+            });
+            selectedPriority = btn.dataset.priority;
+            const cls = selectedPriority === 'Baja' ? 'active-low' : selectedPriority === 'Media' ? 'active-med' : 'active-high';
+            btn.classList.add(cls);
+        }
+
+        // ── Submit ──
+        function submitObs(e) {
+            e.preventDefault();
+            const name = document.getElementById('obs-name').value.trim();
+            const modulo = document.getElementById('obs-modulo').value;
+            const tipo = document.getElementById('obs-tipo').value;
+            const text = document.getElementById('obs-text').value.trim();
+            if (!name || !text) return;
+
+            const obs = {
+                id: Date.now(),
+                nombre: name,
+                modulo,
+                tipo,
+                prioridad: selectedPriority,
+                texto: text,
+                fecha: new Date().toISOString()
+            };
+
+            const list = loadObs();
+            list.unshift(obs);
+            saveObs(list);
+            renderObsList();
+
+            // Reset form
+            document.getElementById('obs-text').value = '';
+            // Remember name for convenience
+
+            // Toast
+            const toast = document.getElementById('toast');
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        // ── Render ──
+        function renderObsList() {
+            const list = loadObs();
+            const body = document.getElementById('obs-list-body');
+            const counter = document.getElementById('obs-counter');
+            counter.textContent = list.length;
+
+            if (list.length === 0) {
+                body.innerHTML = '<div class="obs-empty"><i data-lucide="inbox" style="width:40px;height:40px;"></i><p>Aún no hay observaciones registradas.</p></div>';
+                if (window.lucide) lucide.createIcons();
+                return;
+            }
+
+            body.innerHTML = list.map(obs => {
+                const d = new Date(obs.fecha);
+                const dateStr = d.toLocaleDateString('es-CL', { day: '2-digit', month: 'short', year: 'numeric' }) + ' · ' +
+                                d.toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' });
+                const modClass = obs.modulo === 'BL' ? 'bl' : obs.modulo === 'DUS' ? 'dus' : 'general';
+                const prioClass = obs.prioridad === 'Alta' ? 'alta' : obs.prioridad === 'Media' ? 'media' : 'baja';
+                const tipoEmoji = obs.tipo === 'Error' ? '🐛' : obs.tipo === 'Mejora' ? '💡' : obs.tipo === 'Duda' ? '❓' : '📌';
+
+                return `<div class="obs-item">
+                    <div class="obs-item-header">
+                        <div class="obs-meta">
+                            <span class="obs-priority ${prioClass}"></span>
+                            <span class="obs-author">${escHtml(obs.nombre)}</span>
+                            <span class="obs-module ${modClass}">${escHtml(obs.modulo)}</span>
+                            <span style="color:var(--muted);font-size:0.78rem;">${tipoEmoji} ${escHtml(obs.tipo)}</span>
+                        </div>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <span class="obs-date">${dateStr}</span>
+                            <button class="obs-delete" onclick="deleteObs(${obs.id})" title="Eliminar">
+                                <i data-lucide="trash-2" style="width:14px;height:14px;"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="obs-text">${escHtml(obs.texto)}</div>
+                </div>`;
+            }).join('');
+
+            if (window.lucide) lucide.createIcons();
+        }
+
+        function escHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function deleteObs(id) {
+            if (!confirm('¿Eliminar esta observación?')) return;
+            const list = loadObs().filter(o => o.id !== id);
+            saveObs(list);
+            renderObsList();
+        }
+
+        // ── Export Excel ──
+        function exportObsExcel() {
+            const list = loadObs();
+            if (list.length === 0) return alert('No hay observaciones para exportar.');
+
+            const rows = list.map(o => ({
+                'Fecha': new Date(o.fecha).toLocaleDateString('es-CL'),
+                'Hora': new Date(o.fecha).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }),
+                'Nombre': o.nombre,
+                'Módulo': o.modulo,
+                'Tipo': o.tipo,
+                'Prioridad': o.prioridad,
+                'Descripción': o.texto
+            }));
+
+            const ws = XLSX.utils.json_to_sheet(rows);
+            ws['!cols'] = [
+                { wch: 12 }, { wch: 8 }, { wch: 20 }, { wch: 12 },
+                { wch: 16 }, { wch: 10 }, { wch: 60 }
+            ];
+
+            // Style header
+            const range = XLSX.utils.decode_range(ws['!ref']);
+            for (let C = range.s.c; C <= range.e.c; C++) {
+                const ref = XLSX.utils.encode_cell({ c: C, r: 0 });
+                if (ws[ref]) {
+                    ws[ref].s = {
+                        fill: { fgColor: { rgb: '1E293B' } },
+                        font: { color: { rgb: 'FFFFFF' }, bold: true }
+                    };
+                }
+            }
+
+            // Color rows by priority
+            for (let R = 1; R <= range.e.r; R++) {
+                const prioRef = XLSX.utils.encode_cell({ c: 5, r: R });
+                const prio = ws[prioRef]?.v || '';
+                let bg = 'FFFFFF', fg = '000000';
+                if (prio === 'Alta') { bg = 'fee2e2'; fg = '991b1b'; }
+                else if (prio === 'Media') { bg = 'fef3c7'; fg = '92400e'; }
+                else { bg = 'dcfce7'; fg = '166534'; }
+                for (let C = range.s.c; C <= range.e.c; C++) {
+                    const ref = XLSX.utils.encode_cell({ c: C, r: R });
+                    if (ws[ref]) ws[ref].s = { fill: { fgColor: { rgb: bg } }, font: { color: { rgb: fg } } };
+                }
+            }
+
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, 'Observaciones');
+            XLSX.writeFile(wb, `ExportDesk_Observaciones_${new Date().toISOString().slice(0,10)}.xlsx`);
+        }
+
+        // ── Init ──
+        document.addEventListener('DOMContentLoaded', () => {
+            renderObsList();
+            // Restore name if saved
+            const savedName = localStorage.getItem('exportdesk_obs_name');
+            if (savedName) document.getElementById('obs-name').value = savedName;
+            // Save name on change
+            document.getElementById('obs-name').addEventListener('change', function() {
+                localStorage.setItem('exportdesk_obs_name', this.value.trim());
+            });
+            if (window.lucide) lucide.createIcons();
+        });
+    </script>
+</body>
+</html>

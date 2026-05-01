@@ -484,6 +484,14 @@ function renderStats() {
 
 // ── Table ──
 function esc(s) { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; }
+function cleanDate(val) {
+    const s = String(val || '');
+    // Strip ISO time portion: "2026-04-25T04:00:00.000Z" → "25-04-2026"
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})T/);
+    if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+    return s;
+}
+const DATE_COLS = new Set(['FECHA FACTURA','DEADLINE']);
 
 // Column filter state: { 'RESPONSABLE': Set(['SNAGUIL','MRAMIREZ']), ... }
 let colFilters = {};
@@ -533,7 +541,8 @@ function renderTable() {
             const cls = demora >= 10 ? 'badge-red' : demora >= 6 ? 'badge-orange' : 'badge-green';
 
             const cells = headers.map(h => {
-                const val = r[h] !== undefined ? r[h] : '';
+                let val = r[h] !== undefined ? r[h] : '';
+                if (DATE_COLS.has(h)) val = cleanDate(val);
                 const wc = wrapCols.has(h) ? ' wrap' : '';
                 if (h === demoraKey) return `<td><span class="badge ${cls}">${esc(String(val))} días</span></td>`;
                 if (h === 'ESTADO GENERAL') {
@@ -614,7 +623,8 @@ function downloadCSV() {
         const rowBg = demora >= 10 ? '#fff0f0' : demora >= 6 ? '#fff8f0' : '';
         const rowStyle = rowBg ? ` style="background:${rowBg}"` : '';
         html += `<tr${rowStyle}>` + xlsHeaders.map(h => {
-            const val = h === 'NOTAS EQUIPO' ? notes : String(r[h] || '');
+            let val = h === 'NOTAS EQUIPO' ? notes : String(r[h] || '');
+            if (DATE_COLS.has(h)) val = cleanDate(val);
             // Color the demora cell specifically
             if (h === demoraKey) {
                 const bg = demora >= 10 ? '#dc2626' : demora >= 6 ? '#ea580c' : '#16a34a';

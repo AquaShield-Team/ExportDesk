@@ -603,12 +603,23 @@ function downloadCSV() {
     html += '<head><meta charset="UTF-8"><style>td,th{mso-number-format:"\\@";}</style></head><body><table>';
     html += '<tr>' + xlsHeaders.map(h => `<th style="font-weight:bold;background:#0891b2;color:#fff;">${esc(h)}</th>`).join('') + '</tr>';
 
+    const demoraKey = currentMod === 'COMEX' ? 'DEMORA' : 'DEMORA (días)';
+
     rows.forEach(r => {
         const pedido = r['N° PEDIDO'] || '';
+        const demora = parseInt(r[demoraKey]) || 0;
         const notes = notesArr.filter(n => String(n['N° PEDIDO']) === String(pedido))
             .map(n => `[${n['AUTOR']}] ${n['NOTA']}`).join(' | ');
-        html += '<tr>' + xlsHeaders.map(h => {
+        // Row tint based on demora
+        const rowBg = demora >= 10 ? '#fff0f0' : demora >= 6 ? '#fff8f0' : '';
+        const rowStyle = rowBg ? ` style="background:${rowBg}"` : '';
+        html += `<tr${rowStyle}>` + xlsHeaders.map(h => {
             const val = h === 'NOTAS EQUIPO' ? notes : String(r[h] || '');
+            // Color the demora cell specifically
+            if (h === demoraKey) {
+                const bg = demora >= 10 ? '#dc2626' : demora >= 6 ? '#ea580c' : '#16a34a';
+                return `<td style="background:${bg};color:#fff;font-weight:bold;text-align:center;">${esc(val)}</td>`;
+            }
             return `<td>${esc(val)}</td>`;
         }).join('') + '</tr>';
     });

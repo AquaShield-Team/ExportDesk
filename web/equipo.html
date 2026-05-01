@@ -194,13 +194,11 @@
         .empty-state p { font-size:0.9rem; }
 
         /* Name banner */
-        .name-banner { background:var(--glass); backdrop-filter:blur(8px); border:1px solid var(--glass-border);
-                       border-radius:14px; padding:20px 24px; margin-bottom:24px; display:flex; align-items:center;
-                       gap:12px; }
-        .name-banner input { flex:1; background:var(--glass-heavy); border:1px solid var(--glass-border);
-                             border-radius:8px; padding:10px 14px; color:var(--text-main); font-size:0.9rem; outline:none; }
-        .name-banner input:focus { border-color:var(--primary); }
-        .name-banner label { font-size:0.85rem; color:var(--text-muted); white-space:nowrap; }
+        .name-input { background:var(--glass-heavy); border:1px solid var(--glass-border);
+                      border-radius:8px; padding:6px 12px; color:var(--text-main); font-size:0.82rem;
+                      outline:none; width:180px; }
+        .name-input:focus { border-color:var(--primary); }
+        .name-input::placeholder { color:var(--text-muted); font-size:0.78rem; }
 
         /* Filter chips */
         .filters-bar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:20px; align-items:center; }
@@ -239,8 +237,9 @@
             <span class="logo-text">AQUASHIELD <strong>· ExportDesk Live</strong></span>
         </div>
         <div class="header-right">
+            <input id="author-name" class="name-input" type="text" placeholder="Tu nombre..." title="Tu nombre para las notas" />
             <span class="status-dot"></span>
-            <button id="refresh-btn" class="refresh-btn" onclick="loadAll()">
+            <button id="refresh-btn" class="refresh-btn" onclick="loadAll(true)">
                 <i data-lucide="refresh-cw"></i> Actualizar
             </button>
             <button class="theme-toggle" id="theme-btn" title="Cambiar tema" onclick="toggleTheme()">🌙</button>
@@ -248,11 +247,6 @@
     </header>
 
     <main>
-        <!-- Name -->
-        <div class="name-banner">
-            <label><i data-lucide="user"></i></label>
-            <input id="author-name" type="text" placeholder="Escribe tu nombre para anotar observaciones..." />
-        </div>
 
         <!-- Tabs -->
         <div class="tabs">
@@ -377,11 +371,17 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ── Fetch ──
-async function loadAll() {
+async function loadAll(manual) {
+    // Skip silent refresh if modal is open or user is actively typing
+    if (!manual) {
+        const modal = document.getElementById('note-modal');
+        if (modal && modal.style.display === 'flex') return;
+        if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+    }
     const btn = document.getElementById('refresh-btn');
     const main = document.querySelector('main');
     btn.classList.add('loading');
-    main.classList.add('refreshing');
+    if (manual) main.classList.add('refreshing');
     try {
         const r = await fetch(API + '?action=todo');
         const j = await r.json();
@@ -396,20 +396,22 @@ async function loadAll() {
         updateFilterCounts();
         renderStats();
         renderTable();
-        // Visual flash on table
-        const tw = document.querySelector('.table-wrap');
-        tw.classList.remove('flash');
-        void tw.offsetWidth; // force reflow
-        tw.classList.add('flash');
+        if (manual) {
+            const tw = document.querySelector('.table-wrap');
+            tw.classList.remove('flash');
+            void tw.offsetWidth;
+            tw.classList.add('flash');
+        }
     } catch(e) {
         console.error(e);
         document.getElementById('ts').textContent = '⚠️ Error al cargar: ' + e.message;
     }
-    // Fade content back in
-    setTimeout(() => main.classList.remove('refreshing'), 100);
+    if (manual) setTimeout(() => main.classList.remove('refreshing'), 150);
     btn.classList.remove('loading');
     lucide.createIcons();
 }
+// Auto-refresh every 60s (silent, no animation)
+setInterval(() => loadAll(false), 60000);
 
 // ── Tabs ──
 function switchTab(mod) {

@@ -606,36 +606,51 @@ function downloadCSV() {
     const headers = HEADERS[currentMod];
     const notesArr = currentMod === 'COMEX' ? DATA.notas_comex : DATA.notas_dus;
     const xlsHeaders = [...headers, 'NOTAS EQUIPO'];
-
-    // Build HTML table (Excel opens it perfectly with each field in its own cell)
-    let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
-    html += '<head><meta charset="UTF-8"><style>td,th{mso-number-format:"\\@";}</style></head><body><table>';
-    html += '<tr>' + xlsHeaders.map(h => `<th style="font-weight:bold;background:#0891b2;color:#fff;">${esc(h)}</th>`).join('') + '</tr>';
-
     const demoraKey = currentMod === 'COMEX' ? 'DEMORA' : 'DEMORA (días)';
 
+    // Excel XML 2003 (SpreadsheetML) — no format warning
+    let xml = '<?xml version="1.0" encoding="UTF-8"?>\n';
+    xml += '<?mso-application progid="Excel.Sheet"?>\n';
+    xml += '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"';
+    xml += ' xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">\n';
+
+    // Styles
+    xml += '<Styles>\n';
+    xml += '  <Style ss:ID="hdr"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#0891B2" ss:Pattern="Solid"/></Style>\n';
+    xml += '  <Style ss:ID="txt"><NumberFormat ss:Format="@"/></Style>\n';
+    xml += '  <Style ss:ID="dg"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#16A34A" ss:Pattern="Solid"/><NumberFormat ss:Format="@"/></Style>\n';
+    xml += '  <Style ss:ID="do"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#EA580C" ss:Pattern="Solid"/><NumberFormat ss:Format="@"/></Style>\n';
+    xml += '  <Style ss:ID="dr"><Font ss:Bold="1" ss:Color="#FFFFFF"/><Interior ss:Color="#DC2626" ss:Pattern="Solid"/><NumberFormat ss:Format="@"/></Style>\n';
+    xml += '  <Style ss:ID="ro"><Interior ss:Color="#FFF8F0" ss:Pattern="Solid"/><NumberFormat ss:Format="@"/></Style>\n';
+    xml += '  <Style ss:ID="rr"><Interior ss:Color="#FFF0F0" ss:Pattern="Solid"/><NumberFormat ss:Format="@"/></Style>\n';
+    xml += '</Styles>\n';
+
+    xml += `<Worksheet ss:Name="Pendientes_${currentMod}">\n<Table>\n`;
+
+    // Header row
+    xml += '<Row>\n' + xlsHeaders.map(h =>
+        `  <Cell ss:StyleID="hdr"><Data ss:Type="String">${escXml(h)}</Data></Cell>`
+    ).join('\n') + '\n</Row>\n';
+
+    // Data rows
     rows.forEach(r => {
         const pedido = r['N° PEDIDO'] || '';
         const demora = parseInt(r[demoraKey]) || 0;
         const notes = notesArr.filter(n => String(n['N° PEDIDO']) === String(pedido))
             .map(n => `[${n['AUTOR']}] ${n['NOTA']}`).join(' | ');
-        // Row tint based on demora
-        const rowBg = demora >= 10 ? '#fff0f0' : demora >= 6 ? '#fff8f0' : '';
-        const rowStyle = rowBg ? ` style="background:${rowBg}"` : '';
-        html += `<tr${rowStyle}>` + xlsHeaders.map(h => {
+        const rowStyle = demora >= 10 ? 'rr' : demora >= 6 ? 'ro' : 'txt';
+
+        xml += '<Row>\n' + xlsHeaders.map(h => {
             let val = h === 'NOTAS EQUIPO' ? notes : String(r[h] || '');
             if (DATE_COLS.has(h)) val = cleanDate(val);
-            // Color the demora cell specifically
-            if (h === demoraKey) {
-                const bg = demora >= 10 ? '#dc2626' : demora >= 6 ? '#ea580c' : '#16a34a';
-                return `<td style="background:${bg};color:#fff;font-weight:bold;text-align:center;">${esc(val)}</td>`;
-            }
-            return `<td>${esc(val)}</td>`;
-        }).join('') + '</tr>';
+            let style = rowStyle;
+            if (h === demoraKey) style = demora >= 10 ? 'dr' : demora >= 6 ? 'do' : 'dg';
+            return `  <Cell ss:StyleID="${style}"><Data ss:Type="String">${escXml(val)}</Data></Cell>`;
+        }).join('\n') + '\n</Row>\n';
     });
 
-    html += '</table></body></html>';
-    const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
+    xml += '</Table>\n</Worksheet>\n</Workbook>';
+    const blob = new Blob([xml], { type: 'application/xml;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -643,6 +658,7 @@ function downloadCSV() {
     a.click();
     URL.revokeObjectURL(url);
 }
+function escXml(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ── Modal ──
 let modalPedido = '';

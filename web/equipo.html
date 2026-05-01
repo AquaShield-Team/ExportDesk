@@ -596,25 +596,29 @@ function downloadCSV() {
     const rows = applyFilters(allRows);
     const headers = HEADERS[currentMod];
     const notesArr = currentMod === 'COMEX' ? DATA.notas_comex : DATA.notas_dus;
-    const csvHeaders = [...headers, 'NOTAS EQUIPO'];
+    const xlsHeaders = [...headers, 'NOTAS EQUIPO'];
 
-    const csvRows = rows.map(r => {
+    // Build HTML table (Excel opens it perfectly with each field in its own cell)
+    let html = '<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:x="urn:schemas-microsoft-com:office:excel">';
+    html += '<head><meta charset="UTF-8"><style>td,th{mso-number-format:"\\@";}</style></head><body><table>';
+    html += '<tr>' + xlsHeaders.map(h => `<th style="font-weight:bold;background:#0891b2;color:#fff;">${esc(h)}</th>`).join('') + '</tr>';
+
+    rows.forEach(r => {
         const pedido = r['N° PEDIDO'] || '';
         const notes = notesArr.filter(n => String(n['N° PEDIDO']) === String(pedido))
             .map(n => `[${n['AUTOR']}] ${n['NOTA']}`).join(' | ');
-        return csvHeaders.map(h => {
+        html += '<tr>' + xlsHeaders.map(h => {
             const val = h === 'NOTAS EQUIPO' ? notes : String(r[h] || '');
-            return '"' + val.replace(/"/g, '""') + '"';
-        }).join(';');
+            return `<td>${esc(val)}</td>`;
+        }).join('') + '</tr>';
     });
 
-    const bom = '\uFEFF';
-    const csv = bom + 'sep=;\n' + csvHeaders.join(';') + '\n' + csvRows.join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    html += '</table></body></html>';
+    const blob = new Blob(['\uFEFF' + html], { type: 'application/vnd.ms-excel;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `Pendientes_${currentMod}_${new Date().toISOString().slice(0,10)}.csv`;
+    a.download = `Pendientes_${currentMod}_${new Date().toISOString().slice(0,10)}.xls`;
     a.click();
     URL.revokeObjectURL(url);
 }

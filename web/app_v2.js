@@ -48,7 +48,8 @@ const state = {
     searchQuery: '',
     sortState:    { col: null, dir: 'asc' },
     sortStateDUS: { col: null, dir: 'asc' },
-    activeGrupo: null   // null = Todos, 'congelado', 'fresco'
+    activeGrupo: null,   // null = Todos, 'congelado', 'fresco'
+    teamNotes: { comex: [], dus: [] }  // Team notes from Google Sheets
 };
 
 // UI Elements
@@ -278,15 +279,12 @@ function switchTab(module) {
     const szFilter = document.getElementById('analyst-sinzarpe-filter');
     if (szFilter) szFilter.style.display = isAuditoria ? 'none' : 'flex';
 
-    // Widget DUS Observaciones: visible solo en modulo DUS
+    // Widget DUS Observaciones: DEPRECATED — replaced by team notes from Google Sheets
     const obsWidget = document.getElementById('dus-obs-widget');
-    if (obsWidget) {
-        obsWidget.style.display = isAuditoria ? 'none' : '';
-        if (!isAuditoria && !obsWidget._obsSetup) {
-            setupObsWidget();
-            obsWidget._obsSetup = true;
-        }
-    }
+    if (obsWidget) obsWidget.style.display = 'none';
+
+    // Fetch team notes when switching to DUS
+    if (!isAuditoria) fetchTeamNotes();
 
     // KPI Panel: actualizar según módulo activo
     renderKPIPanel(isAuditoria ? state.results : state.dusResults);
@@ -2021,8 +2019,8 @@ function renderDUS(selected = []) {
     const ss = state.sortStateDUS;
     filtered = sortResults(filtered.map(d => ({...d, _isDUS: true})), ss.col, ss.dir);
 
-    // Columna de Observaciones (oculta su cabecera si no hay obs aplicables)
-    const obs = loadObs();
+    // Columna de Observaciones — now from team notes (Google Sheets)
+    const obs = getTeamNotesMap();
     const hasAnyObs = filtered.some(d => {
         const eg = getDUSEstadoGeneral(d.ESTATUS_FINAL);
         return eg.label !== '\u2705 Legalizado' && !!obs[String(d.PEDIDO || '').trim()];
@@ -2137,7 +2135,7 @@ function exportToExcel() {
         : dataToExport.map(r => {
             const eg = getDUSEstadoGeneral(r.ESTATUS_FINAL);
             const isLegalizado = eg.label === '✅ Legalizado';
-            const obsData = loadObs();
+            const obsData = getTeamNotesMap();
             const nota = isLegalizado ? '' : (obsData[String(r.PEDIDO || '').trim()] || '');
             return {
                 'ESTADO GENERAL': eg.label,
@@ -3810,6 +3808,35 @@ function exportKPIExcel() {
 // ═══════════════════════════════════════════
 const LIVE_API = 'https://script.google.com/macros/s/AKfycbwG82WPhlVyhcleKd5zUQPxGQa_teAXEX4NVifB0Yc6qufeEEuTDpBsri0HfZX4-QVTRQ/exec';
 
+// ── Team Notes from Google Sheets ──
+async function fetchTeamNotes() {
+    try {
+        const r = await fetch(LIVE_API + '?action=todo');
+        const j = await r.json();
+        if (!j.ok) return;
+        state.teamNotes.comex = j.notas_comex?.data || [];
+        state.teamNotes.dus = j.notas_dus?.data || [];
+        // Re-render DUS if currently in DUS module
+        if (state.currentModule === 'dus' && state.dusResults.length > 0) {
+            renderDUS(getSelectedValues('dus-multi-select'));
+        }
+    } catch(e) { console.warn('Team notes fetch error:', e); }
+}
+
+// Build lookup map: { pedido: 'latest note text', ... }
+function getTeamNotesMap() {
+    const notes = state.currentModule === 'dus' ? state.teamNotes.dus : state.teamNotes.comex;
+    const map = {};
+    notes.forEach(n => {
+        const ped = String(n['N° PEDIDO'] || '').trim();
+        if (!ped) return;
+        const text = `[${n['AUTOR'] || 'Anónimo'}] ${n['NOTA'] || ''}`;
+        if (!map[ped]) map[ped] = text;
+        else map[ped] = map[ped] + ' | ' + text;
+    });
+    return map;
+}
+
 const LIVE_HEADERS = {
     COMEX: ['ESTADO GENERAL','DETALLE','DEMORA','T. GESTIÓN','N° PEDIDO','SOLICITANTE','RESPONSABLE','FECHA FACTURA','MOTIVO'],
     DUS:   ['ESTADO GENERAL','DETALLE','N° PEDIDO','CONSIGNATARIO','RESPONSABLE','FECHA FACTURA','DEMORA (días)','DEADLINE','ATRASO S/I','OBSERVACIONES']
@@ -3849,7 +3876,7 @@ function mapDUSToLive(r) {
         'DEMORA (días)': r.DEMORA || 0,
         'DEADLINE': dl,
         'ATRASO S/I': r.DEMORA_SLA || 0,
-        'OBSERVACIONES': ''
+        'OBSERVACIONES': (getTeamNotesMap()[String(r.PEDIDO || '').trim()] || '')
     };
 }
 
@@ -3902,6 +3929,9 @@ async function openNotasLiveModal() {
         if (!j.ok) throw new Error(j.error);
         notasLiveData.comex = j.notas_comex?.data || [];
         notasLiveData.dus = j.notas_dus?.data || [];
+        // Sync with state for obs column
+        state.teamNotes.comex = notasLiveData.comex;
+        state.teamNotes.dus = notasLiveData.dus;
         document.getElementById('nl-count-comex').textContent = `(${notasLiveData.comex.length})`;
         document.getElementById('nl-count-dus').textContent = `(${notasLiveData.dus.length})`;
         document.getElementById('notas-live-ts').textContent = 'Actualizado: ' + new Date().toLocaleString('es-CL');

@@ -49,6 +49,9 @@ body.light-mode input, body.light-mode select, body.light-mode textarea {
 }
 body.light-mode .settings-modal-content,
 body.light-mode .modal-content { background: #ffffff; border-color: rgba(0,0,0,0.1); }
+body.light-mode .logo-text { color: #1e293b; }
+body.light-mode .secondary-btn { color: #334155; }
+body.light-mode .status-badge .label { color: #334155; }
 
 /* Theme toggle */
 .theme-toggle { background:none; border:1px solid var(--glass-border); color:var(--text-muted);
@@ -168,6 +171,12 @@ body {
     position: sticky;
     top: 0;
     z-index: 100;
+}
+
+.glass-header nav {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .logo {
@@ -489,15 +498,16 @@ main {
 .secondary-btn {
     padding: 8px 16px;
     background: var(--glass-heavy);
-    color: white;
+    color: var(--text-main);
     border: 1px solid var(--glass-border);
     border-radius: 8px;
     cursor: pointer;
     display: flex;
     align-items: center;
-    gap: 8px;
-    font-size: 0.85rem;
+    gap: 6px;
+    font-size: 0.8rem;
     transition: background 0.2s;
+    white-space: nowrap;
 }
 
 .secondary-btn:hover:not(:disabled) {

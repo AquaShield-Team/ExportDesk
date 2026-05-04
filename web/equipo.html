@@ -495,8 +495,8 @@ function cleanDate(val) {
 }
 const DATE_COLS = new Set(['FECHA FACTURA','DEADLINE']);
 
-// Column filter state: { 'RESPONSABLE': Set(['SNAGUIL','MRAMIREZ']), ... }
-let colFilters = {};
+// Column filter state per module: { COMEX: { 'RESPONSABLE': Set([...]) }, DUS: { ... } }
+let colFilters = { COMEX: {}, DUS: {} };
 
 function renderTable() {
     const allRows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
@@ -504,9 +504,14 @@ function renderTable() {
     const headers = HEADERS[currentMod];
     const q = document.getElementById('search').value.toLowerCase();
 
-    // Apply column filters
-    Object.entries(colFilters).forEach(([col, vals]) => {
-        if (vals.size > 0) afterFilters = afterFilters.filter(r => vals.has(String(r[col] || '')));
+    // Apply column filters (per module)
+    const modFilters = colFilters[currentMod] || {};
+    Object.entries(modFilters).forEach(([col, vals]) => {
+        if (vals.size > 0) afterFilters = afterFilters.filter(r => {
+            let v = String(r[col] || '');
+            if (DATE_COLS.has(col)) v = cleanDate(v);
+            return vals.has(v);
+        });
     });
 
     const filtered = q ? afterFilters.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))) : afterFilters;
@@ -518,13 +523,11 @@ function renderTable() {
 
     const wrapCols = new Set(['SOLICITANTE','CONSIGNATARIO','DETALLE']);
 
-    // Build header with filter buttons
+    // Build header with filter buttons on ALL columns
     thead.innerHTML = '<tr>' + headers.map(h => {
-        const filterable = ['RESPONSABLE','DETALLE','CONSIGNATARIO','SOLICITANTE','ESTADO GENERAL'].includes(h);
-        const hasFilter = colFilters[h] && colFilters[h].size > 0;
-        const filterBtn = filterable
-            ? `<button class="col-filter-btn${hasFilter?' active':''}" onclick="toggleColFilter(event,'${h}')" title="Filtrar">▼</button>`
-            : '';
+        const mf = colFilters[currentMod] || {};
+        const hasFilter = mf[h] && mf[h].size > 0;
+        const filterBtn = `<button class="col-filter-btn${hasFilter?' active':''}" onclick="toggleColFilter(event,'${h}')" title="Filtrar">▼</button>`;
         return `<th>${esc(h)}${filterBtn}</th>`;
     }).join('') + '<th>Notas</th></tr>';
 
@@ -571,8 +574,13 @@ function toggleColFilter(e, col) {
     document.querySelectorAll('.col-filter-dd.show').forEach(d => d.remove());
     const th = e.target.closest('th');
     const allRows = applyFilters(currentMod === 'COMEX' ? DATA.comex : DATA.dus);
-    const uniqueVals = [...new Set(allRows.map(r => String(r[col] || '')))].sort();
-    const selected = colFilters[col] || new Set();
+    const uniqueVals = [...new Set(allRows.map(r => {
+        let v = String(r[col] || '');
+        if (DATE_COLS.has(col)) v = cleanDate(v);
+        return v;
+    }))].sort();
+    const mf = colFilters[currentMod] || {};
+    const selected = mf[col] || new Set();
 
     const dd = document.createElement('div');
     dd.className = 'col-filter-dd show';
@@ -590,13 +598,14 @@ function toggleColFilter(e, col) {
 }
 
 function toggleColVal(col, checked, val) {
-    if (!colFilters[col]) colFilters[col] = new Set();
-    if (checked) colFilters[col].add(val); else colFilters[col].delete(val);
+    if (!colFilters[currentMod]) colFilters[currentMod] = {};
+    if (!colFilters[currentMod][col]) colFilters[currentMod][col] = new Set();
+    if (checked) colFilters[currentMod][col].add(val); else colFilters[currentMod][col].delete(val);
     renderTable();
 }
 
 function clearColFilter(col) {
-    delete colFilters[col];
+    if (colFilters[currentMod]) delete colFilters[currentMod][col];
     document.querySelectorAll('.col-filter-dd.show').forEach(d => d.remove());
     renderTable();
 }

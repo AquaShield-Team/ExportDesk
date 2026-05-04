@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AQUASHIELD · ExportDesk | Control de Exportaciones</title>
-    <meta name="description" content="Panel de control de auditoría y legalización de exportaciones. Auditoría Comex, BL y DUS en un solo lugar.">
+    <meta name="description" content="Panel de control de auditoría y legalización de exportaciones. Carga BL y DUS en un solo lugar.">
     <link rel="stylesheet" href="styles.css">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -83,7 +83,7 @@
 
             <div class="settings-tabs">
                 <button class="settings-tab active" onclick="switchSettingsTab('auditoria', this)">
-                    <i data-lucide="file-check"></i> Auditoría (BL)
+                    <i data-lucide="file-check"></i> Carga BL
                 </button>
                 <button class="settings-tab" onclick="switchSettingsTab('dus', this)">
                     <i data-lucide="landmark"></i> DUS
@@ -214,7 +214,7 @@
             </div>
             <div class="stat-card glass animate-slide-up" style="--delay: 0.2s">
                 <div class="stat-header">
-                    <span class="stat-label" id="stat-pending-label">Pendientes Comex</span>
+                    <span class="stat-label" id="stat-pending-label">Pendientes BL</span>
                     <i data-lucide="clock" class="icon-orange" id="stat-pending-icon"></i>
                 </div>
                 <div class="stat-value" id="stat-pending">0</div>
@@ -241,7 +241,7 @@
                     
                     <!-- Botones de ejecución (arriba, por módulo) -->
                     <button id="run-audit-btn" class="primary-btn glow" disabled style="margin-bottom: 12px;">
-                        <i data-lucide="play"></i> Ejecutar Auditoría Comex
+                        <i data-lucide="play"></i> Ejecutar Carga BL
                     </button>
                     <button id="run-dus-btn" class="primary-btn glow" disabled style="margin-bottom: 12px; display:none;">
                         <i data-lucide="play"></i> Ejecutar Legalización DUS
@@ -463,7 +463,7 @@
                 <div class="widget-header-tabs glass">
                     <div class="tabs-nav">
                         <button class="tab-btn active" data-module="auditoria">
-                            <i data-lucide="table"></i> Auditoría Comex
+                            <i data-lucide="table"></i> Carga BL
                         </button>
                         <button class="tab-btn" data-module="dus">
                             <i data-lucide="file-text"></i> Legalización DUS
@@ -654,7 +654,7 @@
             </div>
             <div style="padding:20px;">
                 <div style="display:flex; gap:8px; margin-bottom:16px;">
-                    <button class="secondary-btn" id="nl-tab-comex" onclick="switchNotasTab('COMEX')" style="flex:1;">📋 COMEX <span id="nl-count-comex"></span></button>
+                    <button class="secondary-btn" id="nl-tab-comex" onclick="switchNotasTab('COMEX')" style="flex:1;">📋 Carga BL <span id="nl-count-comex"></span></button>
                     <button class="secondary-btn" id="nl-tab-dus" onclick="switchNotasTab('DUS')" style="flex:1;">📄 DUS <span id="nl-count-dus"></span></button>
                 </div>
                 <div id="notas-live-list" style="max-height:400px; overflow-y:auto;"></div>

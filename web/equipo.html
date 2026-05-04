@@ -530,8 +530,10 @@ function renderTable() {
             let va = a[col] ?? '', vb = b[col] ?? '';
             if (NUMERIC_COLS.has(col)) {
                 va = parseFloat(va) || 0; vb = parseFloat(vb) || 0;
+            } else if (DATE_COLS.has(col)) {
+                // Use raw ISO strings for chronological sort (YYYY-MM-DD)
+                va = String(va); vb = String(vb);
             } else {
-                if (DATE_COLS.has(col)) { va = cleanDate(va); vb = cleanDate(vb); }
                 va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
             }
             if (va < vb) return dir === 'asc' ? -1 : 1;

@@ -114,7 +114,10 @@
         table { width:100%; border-collapse:collapse; }
         thead th { position:sticky; top:0; background:rgba(10,10,11,0.95); padding:10px 10px; text-align:left;
                    font-size:0.72rem; text-transform:uppercase; letter-spacing:0.5px; color:var(--text-muted);
-                   border-bottom:1px solid var(--glass-border); white-space:nowrap; cursor:default; }
+                   border-bottom:1px solid var(--glass-border); white-space:nowrap; }
+        .th-label { cursor:pointer; user-select:none; transition:color .15s; }
+        .th-label:hover { color:var(--primary); }
+        .sort-arrow { font-size:0.6rem; margin-left:3px; opacity:0.6; }
         tbody td { padding:8px 10px; font-size:0.82rem; border-bottom:1px solid rgba(255,255,255,0.03);
                    white-space:nowrap; max-width:280px; overflow:hidden; text-overflow:ellipsis; }
         tbody td.wrap { white-space:normal; word-break:break-word; max-width:260px; }
@@ -497,6 +500,8 @@ const DATE_COLS = new Set(['FECHA FACTURA','DEADLINE']);
 
 // Column filter state per module: { COMEX: { 'RESPONSABLE': Set([...]) }, DUS: { ... } }
 let colFilters = { COMEX: {}, DUS: {} };
+// Sort state per module: { COMEX: { col: 'DEMORA', dir: 'asc' }, DUS: null }
+let colSort = { COMEX: null, DUS: null };
 
 function renderTable() {
     const allRows = currentMod === 'COMEX' ? DATA.comex : DATA.dus;
@@ -516,6 +521,25 @@ function renderTable() {
 
     const filtered = q ? afterFilters.filter(r => Object.values(r).some(v => String(v).toLowerCase().includes(q))) : afterFilters;
 
+    // Apply sort (per module)
+    const sortCfg = colSort[currentMod];
+    const NUMERIC_COLS = new Set(['DEMORA','DEMORA (días)','T. GESTIÓN']);
+    if (sortCfg) {
+        const { col, dir } = sortCfg;
+        filtered.sort((a, b) => {
+            let va = a[col] ?? '', vb = b[col] ?? '';
+            if (NUMERIC_COLS.has(col)) {
+                va = parseFloat(va) || 0; vb = parseFloat(vb) || 0;
+            } else {
+                if (DATE_COLS.has(col)) { va = cleanDate(va); vb = cleanDate(vb); }
+                va = String(va).toLowerCase(); vb = String(vb).toLowerCase();
+            }
+            if (va < vb) return dir === 'asc' ? -1 : 1;
+            if (va > vb) return dir === 'asc' ? 1 : -1;
+            return 0;
+        });
+    }
+
     const thead = document.getElementById('thead');
     const tbody = document.getElementById('tbody');
     const empty = document.getElementById('empty');
@@ -523,12 +547,17 @@ function renderTable() {
 
     const wrapCols = new Set(['SOLICITANTE','CONSIGNATARIO','DETALLE']);
 
-    // Build header with filter buttons on ALL columns
+    // Build header with sort + filter buttons on ALL columns
     thead.innerHTML = '<tr>' + headers.map(h => {
         const mf = colFilters[currentMod] || {};
         const hasFilter = mf[h] && mf[h].size > 0;
         const filterBtn = `<button class="col-filter-btn${hasFilter?' active':''}" onclick="toggleColFilter(event,'${h}')" title="Filtrar">▼</button>`;
-        return `<th>${esc(h)}${filterBtn}</th>`;
+        // Sort indicator
+        let sortArrow = '';
+        if (sortCfg && sortCfg.col === h) {
+            sortArrow = `<span class="sort-arrow">${sortCfg.dir === 'asc' ? '↑' : '↓'}</span>`;
+        }
+        return `<th><span class="th-label" onclick="sortByCol('${h}')">${esc(h)}${sortArrow}</span>${filterBtn}</th>`;
     }).join('') + '<th>Notas</th></tr>';
 
     if (filtered.length === 0) {
@@ -565,6 +594,19 @@ function renderTable() {
         }).join('');
     }
     lucide.createIcons();
+}
+
+// ── Column sorting ──
+function sortByCol(col) {
+    const cur = colSort[currentMod];
+    if (!cur || cur.col !== col) {
+        colSort[currentMod] = { col, dir: 'asc' };
+    } else if (cur.dir === 'asc') {
+        colSort[currentMod] = { col, dir: 'desc' };
+    } else {
+        colSort[currentMod] = null; // 3rd click removes sort
+    }
+    renderTable();
 }
 
 // ── Column filter dropdown ──

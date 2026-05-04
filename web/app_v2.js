@@ -262,9 +262,7 @@ function switchTab(module) {
     // Update Chart for Current Module
     if (isAuditoria) {
         updateChart(state.results);
-        // Mostrar widgets exclusivos de Auditoría
-        const treemapW = document.getElementById('treemap-chart-widget');
-        if (treemapW) treemapW.style.display = '';
+
     } else {
         updateChartForDUS(state.dusResults);
     }
@@ -1449,7 +1447,6 @@ function updateChart(results) {
     Plotly.react(el, data, layout, PLOTLY_CONFIG);
     updateTrendChart();
     updateHeatmapChart(results);
-    updateTreemapChart(results);
     renderKPIPanel(results);
 }
 
@@ -1520,9 +1517,7 @@ function updateChartForDUS(results) {
     };
 
     Plotly.react(wf, data, layout, PLOTLY_CONFIG);
-    // Ocultar gráficos exclusivos de Auditoría cuando estamos en DUS
-    const treemapW = document.getElementById('treemap-chart-widget');
-    if (treemapW) treemapW.style.display = 'none';
+
 }
 
 /** Tendencia mensual — línea de procesados vs pendientes desde memoria */
@@ -1690,96 +1685,6 @@ function updateHeatmapChart(results) {
     Plotly.react(el, data, layout, PLOTLY_CONFIG);
 }
 
-/** Treemap de distribución por cliente (solo Auditoría) */
-function updateTreemapChart(results) {
-    const el = document.getElementById('treemapChart');
-    const emptyEl = document.getElementById('treemap-empty');
-    const widget = document.getElementById('treemap-chart-widget');
-    if (!el) return;
-
-    // Solo visible en Auditoría
-    if (state.currentModule !== 'auditoria') {
-        if (widget) widget.style.display = 'none';
-        return;
-    }
-    if (widget) widget.style.display = '';
-
-    if (!results || results.length === 0) {
-        Plotly.purge(el);
-        if (emptyEl) emptyEl.style.display = 'flex';
-        return;
-    }
-    if (emptyEl) emptyEl.style.display = 'none';
-
-    // Agrupar por cliente
-    const clientMap = {};
-    results.forEach(r => {
-        const cliente = r.CLIENTE || 'Sin Cliente';
-        if (!clientMap[cliente]) clientMap[cliente] = { total: 0, proc: 0 };
-        clientMap[cliente].total++;
-        if (r.ESTATUS_FINAL.includes('✅') || r.ESTATUS_FINAL.includes('🚚')) {
-            clientMap[cliente].proc++;
-        }
-    });
-
-    // Top 20 clientes por volumen
-    const top = Object.entries(clientMap)
-        .sort((a, b) => b[1].total - a[1].total)
-        .slice(0, 20);
-
-    const labels = ['Clientes'];
-    const parents = [''];
-    const values = [0];
-    const colors = [0];
-    const texts = [''];
-
-    top.forEach(([name, { total, proc }]) => {
-        const pct = Math.round((proc / total) * 100);
-        const shortName = name.length > 22 ? name.slice(0, 19) + '…' : name;
-        labels.push(shortName);
-        parents.push('Clientes');
-        values.push(total);
-        colors.push(pct);
-        texts.push(`${total} pedidos · ${pct}% procesado`);
-    });
-
-    const data = [{
-        type: 'treemap',
-        labels: labels,
-        parents: parents,
-        values: values,
-        text: texts,
-        textinfo: 'label+text',
-        textfont: { size: 11 },
-        marker: {
-            colors: colors,
-            colorscale: [
-                [0, '#ef4444'],
-                [0.5, '#f59e0b'],
-                [1, '#10b981']
-            ],
-            line: { width: 1, color: 'rgba(15,23,42,0.6)' },
-            showscale: true,
-            colorbar: {
-                title: '% Cumpl.',
-                titlefont: { size: 10, color: 'rgba(255,255,255,0.6)' },
-                tickfont: { color: 'rgba(255,255,255,0.5)' },
-                len: 0.6,
-                ticksuffix: '%'
-            }
-        },
-        hovertemplate: '<b>%{label}</b><br>%{text}<extra></extra>',
-        pathbar: { visible: false }
-    }];
-
-    const layout = {
-        ...PLOTLY_DARK_LAYOUT,
-        height: 350,
-        margin: { t: 10, r: 10, b: 10, l: 10 }
-    };
-
-    Plotly.react(el, data, layout, PLOTLY_CONFIG);
-}
 
 function cleanPedido(val) {
     if (!val) return "";
